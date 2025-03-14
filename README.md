@@ -1,128 +1,6 @@
-### 11. Book an Appointment
-After checking availability, you can book an appointment using the booking endpoint:
-
-#### Using cURL
-
-```bash
-curl -X POST http://localhost:8000/book-appointment \
--H "Content-Type: application/json" \
--H "Authorization: Bearer YOUR_GHL_API_KEY" \
--d '{
-  "calendarId": "YOUR_CALENDAR_ID",
-  "startTime": "2025-03-15T10:00:00.000Z",
-  "endTime": "2025-03-15T11:00:00.000Z",
-  "contactInfo": {
-    "email": "client@example.com",
-    "firstName": "John",
-    "lastName": "Doe",
-    "phone": "+12125551234"
-  },
-  "timezone": "America/New_York",
-  "notes": "Client is interested in discussing product options"
-}'
-```
-
-#### Using JavaScript/Fetch API
-
-```javascript
-fetch('http://localhost:8000/book-appointment', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_GHL_API_KEY'
-  },
-  body: JSON.stringify({
-    calendarId: 'YOUR_CALENDAR_ID',
-    startTime: '2025-03-15T10:00:00.000Z',
-    endTime: '2025-03-15T11:00:00.000Z',
-    contactInfo: {
-      email: 'client@example.com',
-      firstName: 'John',
-      lastName: 'Doe',
-      phone: '+12125551234'
-    },
-    timezone: 'America/New_York',
-    notes: 'Client is interested in discussing product options'
-  })
-})
-.then(response => response.json())
-.then(data => console.log(data))
-.catch(error => console.error('Error:', error));
-```
-
-#### Using Python/Requests
-
-```python
-import requests
-import json
-
-url = "http://localhost:8000/book-appointment"
-headers = {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer YOUR_GHL_API_KEY"
-}
-payload = {
-    "calendarId": "YOUR_CALENDAR_ID",
-    "startTime": "2025-03-15T10:00:00.000Z",
-    "endTime": "2025-03-15T11:00:00.000Z",
-    "contactInfo": {
-        "email": "client@example.com",
-        "firstName": "John",
-        "lastName": "Doe",
-        "phone": "+12125551234"
-    },
-    "timezone": "America/New_York",
-    "notes": "Client is interested in discussing product options"
-}
-
-response = requests.post(url, headers=headers, data=json.dumps(payload))
-print(response.json())
-```
-
-#### Parameters
-
-1. **Required Parameters**:
-   - `calendarId`: The Go High Level calendar ID
-   - `startTime`: Appointment start time in ISO format
-   - `endTime`: Appointment end time in ISO format
-   - `contactInfo`: Object containing at least an email address
-   - `Authorization`: Bearer token with your Go High Level API key (header)
-
-2. **Optional Parameters**:
-   - `timezone`: Timezone for the appointment (defaults to system timezone)
-   - `notes`: Additional notes for the appointment
-   - Additional contact fields in the `contactInfo` object (firstName, lastName, phone, etc.)
-
-#### Response Example
-
-```json
-{
-  "requestId": "lq1ab3c7de",
-  "status": "success",
-  "message": "Appointment booked successfully",
-  "appointmentId": "app_12345678",
-  "details": {
-    "calendarId": "YOUR_CALENDAR_ID",
-    "startTime": "2025-03-15T10:00:00.000Z",
-    "endTime": "2025-03-15T11:00:00.000Z",
-    "timezone": "America/New_York",
-    "contact": {
-      "email": "client@example.com",
-      "name": "John Doe"
-    }
-  },
-  "notification": {
-    "message": "Contact has a phone number. You can use make-outbound-call to send a confirmation.",
-    "phone": "+12125551234"
-  }
-}### 9. Monitor Active Calls
-```bash
-curl http://localhost:8000/active-calls
-```# Eleven Labs Outbound Caller  
+# Eleven Labs Outbound Caller  
 
 This project demonstrates the integration of **Eleven Labs Conversational AI** with **Twilio** to enable seamless real-time interactions during outbound and inbound phone calls. The system leverages WebSockets for media streaming and integrates Eleven Labs' advanced conversational AI capabilities for human-like interactions.
-
----
 
 ## Features  
 - **Outbound Call Integration**: Programmatically initiate outbound calls using Twilio's API.  
@@ -131,8 +9,7 @@ This project demonstrates the integration of **Eleven Labs Conversational AI** w
 - **Dynamic Configuration API**: Configure Twilio credentials, phone numbers, and AI agents via API endpoints.
 - **Multiple Agent Support**: Use different AI agents for different calls.
 - **Call Monitoring**: Track active calls and their statistics.
-
----
+- **Calendar Integration**: Check availability and book appointments via Go High Level.
 
 ## Getting Started  
 
@@ -174,40 +51,41 @@ Expose your local server to the internet using Ngrok. Run the following command 
 ngrok http 8000
 ```
 
-### 7. Configure via API
+## Configuration
+
 You can configure the system dynamically via API endpoints:
 
-#### Set Twilio Credentials
+### Set Twilio Credentials
 ```bash
 curl -X POST http://localhost:8000/config/twilio-credentials \
 -H "Content-Type: application/json" \
 -d '{"accountSid": "YOUR_ACCOUNT_SID", "authToken": "YOUR_AUTH_TOKEN"}'
 ```
 
-#### Add a Twilio Phone Number
+### Add a Twilio Phone Number
 ```bash
 curl -X POST http://localhost:8000/config/twilio-phone-numbers \
 -H "Content-Type: application/json" \
 -d '{"phoneNumber": "+1234567890"}'
 ```
 
-#### Add an ElevenLabs Agent
+### Add an ElevenLabs Agent
 ```bash
 curl -X POST http://localhost:8000/config/elevenlabs-agents \
 -H "Content-Type: application/json" \
 -d '{"agentId": "your-agent-id"}'
 ```
 
-#### View Current Configuration
+### View Current Configuration
 ```bash
 curl http://localhost:8000/config
 ```
 
-### 8. Make Outbound Calls
-You can now initiate calls with specific phone numbers and agents:
+## Usage Examples
+
+### 1. Make Outbound Calls
 
 #### Using cURL
-
 ```bash
 curl -X POST http://localhost:8000/make-outbound-call \
 -H "Content-Type: application/json" \
@@ -219,7 +97,6 @@ curl -X POST http://localhost:8000/make-outbound-call \
 ```
 
 #### Using JavaScript/Fetch API
-
 ```javascript
 fetch('http://localhost:8000/make-outbound-call', {
   method: 'POST',
@@ -238,7 +115,6 @@ fetch('http://localhost:8000/make-outbound-call', {
 ```
 
 #### Using Python/Requests
-
 ```python
 import requests
 
@@ -255,7 +131,6 @@ print(response.json())
 ```
 
 #### Parameters
-
 1. **Required Parameters**:
    - `to`: The destination phone number in E.164 format (e.g., +12125551234)
 
@@ -265,25 +140,26 @@ print(response.json())
 
 If optional parameters are not provided, the system will use the first configured values.
 
-### 10. Check Representative Availability
-You can check a Go High Level calendar for a representative's availability:
+### 2. Monitor Active Calls
+```bash
+curl http://localhost:8000/active-calls
+```
+
+### 3. Check Representative Availability
 
 #### Using cURL
-
 ```bash
 curl "http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID" \
 -H "Authorization: Bearer YOUR_GHL_API_KEY"
 ```
 
 With optional parameters:
-
 ```bash
 curl "http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID&startDate=2025-03-15&endDate=2025-03-22&timezone=America/New_York" \
 -H "Authorization: Bearer YOUR_GHL_API_KEY"
 ```
 
 #### Using JavaScript/Fetch API
-
 ```javascript
 fetch('http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID', {
   method: 'GET',
@@ -297,7 +173,6 @@ fetch('http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID', {
 ```
 
 #### Using Python/Requests
-
 ```python
 import requests
 
@@ -316,7 +191,6 @@ print(response.json())
 ```
 
 #### Parameters
-
 1. **Required Parameters**:
    - `calendarId`: The Go High Level calendar ID to check for availability (query parameter)
    - `Authorization`: Bearer token with your Go High Level API key (header)
@@ -326,7 +200,119 @@ print(response.json())
    - `endDate`: End date for availability search (YYYY-MM-DD format, defaults to 7 days from today)
    - `timezone`: Timezone for the availability slots (defaults to system timezone)
 
----
+### 4. Book an Appointment
+
+#### Using cURL
+```bash
+curl -X POST http://localhost:8000/book-appointment \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer YOUR_GHL_API_KEY" \
+-d '{
+  "calendarId": "YOUR_CALENDAR_ID",
+  "startTime": "2025-03-15T10:00:00.000Z",
+  "endTime": "2025-03-15T11:00:00.000Z",
+  "contactInfo": {
+    "email": "client@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "phone": "+12125551234"
+  },
+  "timezone": "America/New_York",
+  "notes": "Client is interested in discussing product options"
+}'
+```
+
+#### Using JavaScript/Fetch API
+```javascript
+fetch('http://localhost:8000/book-appointment', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_GHL_API_KEY'
+  },
+  body: JSON.stringify({
+    calendarId: 'YOUR_CALENDAR_ID',
+    startTime: '2025-03-15T10:00:00.000Z',
+    endTime: '2025-03-15T11:00:00.000Z',
+    contactInfo: {
+      email: 'client@example.com',
+      firstName: 'John',
+      lastName: 'Doe',
+      phone: '+12125551234'
+    },
+    timezone: 'America/New_York',
+    notes: 'Client is interested in discussing product options'
+  })
+})
+.then(response => response.json())
+.then(data => console.log(data))
+.catch(error => console.error('Error:', error));
+```
+
+#### Using Python/Requests
+```python
+import requests
+import json
+
+url = "http://localhost:8000/book-appointment"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer YOUR_GHL_API_KEY"
+}
+payload = {
+    "calendarId": "YOUR_CALENDAR_ID",
+    "startTime": "2025-03-15T10:00:00.000Z",
+    "endTime": "2025-03-15T11:00:00.000Z",
+    "contactInfo": {
+        "email": "client@example.com",
+        "firstName": "John",
+        "lastName": "Doe",
+        "phone": "+12125551234"
+    },
+    "timezone": "America/New_York",
+    "notes": "Client is interested in discussing product options"
+}
+
+response = requests.post(url, headers=headers, data=json.dumps(payload))
+print(response.json())
+```
+
+#### Parameters
+1. **Required Parameters**:
+   - `calendarId`: The Go High Level calendar ID
+   - `startTime`: Appointment start time in ISO format
+   - `endTime`: Appointment end time in ISO format
+   - `contactInfo`: Object containing at least an email address
+   - `Authorization`: Bearer token with your Go High Level API key (header)
+
+2. **Optional Parameters**:
+   - `timezone`: Timezone for the appointment (defaults to system timezone)
+   - `notes`: Additional notes for the appointment
+   - Additional contact fields in the `contactInfo` object (firstName, lastName, phone, etc.)
+
+#### Response Example
+```json
+{
+  "requestId": "lq1ab3c7de",
+  "status": "success",
+  "message": "Appointment booked successfully",
+  "appointmentId": "app_12345678",
+  "details": {
+    "calendarId": "YOUR_CALENDAR_ID",
+    "startTime": "2025-03-15T10:00:00.000Z",
+    "endTime": "2025-03-15T11:00:00.000Z",
+    "timezone": "America/New_York",
+    "contact": {
+      "email": "client@example.com",
+      "name": "John Doe"
+    }
+  },
+  "notification": {
+    "message": "Contact has a phone number. You can use make-outbound-call to send a confirmation.",
+    "phone": "+12125551234"
+  }
+}
+```
 
 ## API Reference
 
