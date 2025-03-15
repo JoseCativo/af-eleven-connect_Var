@@ -335,11 +335,6 @@ fastify.get("/config", async (request, reply) => {
 
 // Route to handle incoming calls from Twilio
 fastify.all("/incoming-call-eleven", async (request, reply) => {
-  // Check if we have the configuration
-  if (configStore.ELEVENLABS_AGENT_IDS.length === 0) {
-    return reply.status(500).send("No ElevenLabs agents configured");
-  }
-
   // Generate TwiML response to connect the call to a WebSocket stream
   const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
@@ -582,7 +577,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     );
 
     // Build the webhook URL with the agent ID as a query parameter
-    const webhookUrl = `https://${request.headers.host}/incoming-call-eleven?agentId=${selectedAgentId}`;
+    const webhookUrl = `https://${request.headers.host}/incoming-call-eleven`;
 
     // Check Twilio client validity
     if (!twilioClient) {
@@ -626,9 +621,6 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     reply.send({
       message: "Call initiated successfully",
       callSid: call.sid,
-      agentId: selectedAgentId,
-      fromNumber,
-      requestId,
     });
   } catch (error) {
     // Detailed error handling based on the type of error
@@ -966,7 +958,7 @@ fastify.post("/call-status", async (request, reply) => {
 });
 
 // Start the Fastify server
-fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
+fastify.listen({ port: PORT }, (err) => {
   if (err) {
     console.error("Error starting server:", err);
     process.exit(1);
