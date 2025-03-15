@@ -12,9 +12,9 @@ dotenv.config();
 
 // Initialize config store for dynamic parameters
 const configStore = {
-  // Default values from environment variables
-  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID || "",
-  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || "",
+  // Default values from environment variables - these should be strings, not arrays
+  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN,
   TWILIO_PHONE_NUMBERS: process.env.TWILIO_PHONE_NUMBER
     ? [process.env.TWILIO_PHONE_NUMBER]
     : [],
@@ -171,8 +171,8 @@ fastify.register(fastifyWs);
 
 // Initialize Twilio client
 let twilioClient = Twilio(
-  configStore.TWILIO_ACCOUNT_SID,
-  configStore.TWILIO_AUTH_TOKEN
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
 );
 
 const PORT = process.env.PORT || 8000;
@@ -407,6 +407,7 @@ fastify.register(async (fastifyInstance) => {
             break;
           case "audio":
             if (message.audio_event?.audio_base_64) {
+              // Send audio data to Twilio
               const audioData = {
                 event: "media",
                 streamSid,
@@ -418,9 +419,11 @@ fastify.register(async (fastifyInstance) => {
             }
             break;
           case "interruption":
+            // Clear Twilio's audio queue
             connection.send(JSON.stringify({ event: "clear", streamSid }));
             break;
           case "ping":
+            // Respond to ping events from ElevenLabs
             if (message.ping_event?.event_id) {
               const pongResponse = {
                 type: "pong",
@@ -432,59 +435,13 @@ fastify.register(async (fastifyInstance) => {
         }
       };
 
-      connection.on("message", async (message) => {
-        try {
-          const data = JSON.parse(message);
-          switch (data.event) {
-            case "start":
-              streamSid = data.start.streamSid;
-              console.log(`[Twilio] Stream started with ID: ${streamSid}`);
-
-              // Add to active connections
-              configStore.activeConnections.set(streamSid, {
-                agentId,
-                startTime: new Date(),
-                callSid: data.start.callSid,
-              });
-              break;
-            case "media":
-              if (elevenLabsWs.readyState === WebSocket.OPEN) {
-                const audioMessage = {
-                  user_audio_chunk: Buffer.from(
-                    data.media.payload,
-                    "base64"
-                  ).toString("base64"),
-                };
-                elevenLabsWs.send(JSON.stringify(audioMessage));
-              }
-              break;
-            case "stop":
-              if (streamSid && configStore.activeConnections.has(streamSid)) {
-                configStore.activeConnections.delete(streamSid);
-              }
-              elevenLabsWs.close();
-              break;
-            default:
-              console.log(`[Twilio] Received unhandled event: ${data.event}`);
-          }
-        } catch (error) {
-          console.error("[Twilio] Error processing message:", error);
-        }
-      });
-
       connection.on("close", () => {
-        if (streamSid && configStore.activeConnections.has(streamSid)) {
-          configStore.activeConnections.delete(streamSid);
-        }
         elevenLabsWs.close();
         console.log("[Twilio] Client disconnected");
       });
-
+      // Handle errors from Twilio WebSocket
       connection.on("error", (error) => {
         console.error("[Twilio] WebSocket error:", error);
-        if (streamSid && configStore.activeConnections.has(streamSid)) {
-          configStore.activeConnections.delete(streamSid);
-        }
         elevenLabsWs.close();
       });
     }
@@ -675,19 +632,6 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       requestId,
     });
   }
-});
-
-// Get active calls
-fastify.get("/active-calls", async (request, reply) => {
-  reply.send({
-    activeCalls: Array.from(configStore.activeConnections.entries()).map(
-      ([streamSid, info]) => ({
-        streamSid,
-        ...info,
-        duration: Math.floor((new Date() - info.startTime) / 1000), // Duration in seconds
-      })
-    ),
-  });
 });
 
 // Route to get a representative's availability
