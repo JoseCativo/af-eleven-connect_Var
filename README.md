@@ -9,6 +9,7 @@ This project demonstrates the integration of **Eleven Labs Conversational AI** w
 - **AI-Powered Conversations**: Use Eleven Labs Conversational AI to create dynamic, human-like dialogues.
 - **Dynamic Configuration API**: Configure Twilio credentials, phone numbers, and AI agents via API endpoints.
 - **Multiple Agent Support**: Use different AI agents for different calls.
+- **Dynamic Variables**: Personalize conversations with customer-specific information.
 - **Call Monitoring**: Track active calls and their statistics.
 - **Calendar Integration**: Check availability and book appointments via Go High Level.
 
@@ -19,13 +20,13 @@ Follow these steps to set up and run the project:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/esplanadeai/11labs_Outbound.git
+git clone https://github.com/Affinity-Design/af-eleven-connect
 ```
 
 ### 2. Navigate to the Project Directory
 
 ```bash
-cd 11labs_Outbound
+cd ad-eleven-connect
 ```
 
 ### 3. Install Dependencies
@@ -43,6 +44,7 @@ TWILIO_ACCOUNT_SID=your-twilio-account-sid
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 TWILIO_PHONE_NUMBER=your-twilio-phone-number
 ELEVENLABS_AGENT_ID=your-eleven-labs-agent-id
+ELEVENLABS_API_KEY=your-eleven-labs-api-key
 PORT=8000
 ```
 
@@ -94,11 +96,9 @@ curl -X POST http://localhost:8000/config/elevenlabs-agents \
 curl http://localhost:8000/config
 ```
 
-## Usage Examples
+## API Reference
 
-### 1. Make Outbound Calls
-
-#### Using cURL
+### Make Outbound Calls
 
 ```bash
 curl -X POST http://localhost:8000/make-outbound-call \
@@ -107,66 +107,14 @@ curl -X POST http://localhost:8000/make-outbound-call \
   "to": "+1234567890",
   "phoneNumber": "+1987654321",
   "agentId": "your-agent-id",
-  "prompt": "You are a sales representative calling to discuss our new product offerings.",
-  "first_message": "Hello, this is Alex from EsplanadeAI. How are you doing today?",
+  "prompt": "You are a sales representative calling about our services.",
+  "first_message": "Hello, this is Alex from EsplanadeAI. How are you today?",
   "fullName": "John Smith",
   "email": "john@example.com",
   "company": "Acme Corp",
   "jobTitle": "CTO",
   "city": "San Francisco"
 }'
-```
-
-#### Using JavaScript/Fetch API
-
-```javascript
-fetch("http://localhost:8000/make-outbound-call", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    to: "+1234567890",
-    phoneNumber: "+1987654321",
-    agentId: "your-agent-id",
-    prompt:
-      "You are a sales representative calling to discuss our new product offerings.",
-    first_message:
-      "Hello, this is Alex from EsplanadeAI. How are you doing today?",
-    fullName: "John Smith",
-    email: "john@example.com",
-    company: "Acme Corp",
-    jobTitle: "CTO",
-    city: "San Francisco",
-  }),
-})
-  .then((response) => response.json())
-  .then((data) => console.log(data))
-  .catch((error) => console.error("Error:", error));
-```
-
-#### Using Python/Requests
-
-```python
-import requests
-
-url = "http://localhost:8000/make-outbound-call"
-payload = {
-    "to": "+1234567890",
-    "phoneNumber": "+1987654321",
-    "agentId": "your-agent-id",
-    "prompt": "You are a sales representative calling to discuss our new product offerings.",
-    "first_message": "Hello, this is Alex from EsplanadeAI. How are you doing today?",
-    "fullName": "John Smith",
-    "email": "john@example.com",
-    "company": "Acme Corp",
-    "jobTitle": "CTO",
-    "city": "San Francisco"
-}
-headers = {"Content-Type": "application/json"}
-
-response = requests.post(url, json=payload, headers=headers)
-print(response.json())
 ```
 
 #### Parameters
@@ -186,23 +134,41 @@ print(response.json())
    - `jobTitle`: Customer's job title or position
    - `city`: Customer's city or location
 
-If optional parameters are not provided, the system will use the first configured values for phone number and agent ID. For personal details (fullName, company, etc.), the system will use a generic approach if they're not provided.
+If optional parameters are not provided, the system will use the first configured values for phone number and agent ID. For personal details, the system will use a generic approach if they're not provided.
 
-If no custom prompt or first_message is specified, the system automatically generates personalized versions based on the available customer information.
+### Monitor Active Calls
 
-#### Response Example
-
-```json
-{
-  "success": true,
-  "message": "Call initiated successfully",
-  "callSid": "CA123456789012345678901234567890ab"
-}
+```bash
+curl http://localhost:8000/active-calls
 ```
 
-### 4. Book an Appointment
+### Check Representative Availability
 
-#### Using cURL
+```bash
+curl -X POST http://localhost:8000/get-availability \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer YOUR_GHL_API_KEY" \
+-d '{
+  "calendarId": "YOUR_CALENDAR_ID",
+  "startDate": "2025-03-15",
+  "endDate": "2025-03-22",
+  "timezone": "America/New_York"
+}'
+```
+
+#### Parameters
+
+1. **Required Parameters**:
+
+   - `calendarId`: The Go High Level calendar ID
+   - `Authorization`: Bearer token with your Go High Level API key (header)
+
+2. **Optional Parameters**:
+   - `startDate`: Start date for availability search (YYYY-MM-DD format, defaults to today)
+   - `endDate`: End date for availability search (YYYY-MM-DD format, defaults to 7 days from today)
+   - `timezone`: Timezone for the availability slots (defaults to system timezone)
+
+### Book an Appointment
 
 ```bash
 curl -X POST http://localhost:8000/book-appointment \
@@ -223,63 +189,6 @@ curl -X POST http://localhost:8000/book-appointment \
 }'
 ```
 
-#### Using JavaScript/Fetch API
-
-```javascript
-fetch("http://localhost:8000/book-appointment", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: "Bearer YOUR_GHL_API_KEY",
-  },
-  body: JSON.stringify({
-    calendarId: "YOUR_CALENDAR_ID",
-    startTime: "2025-03-15T10:00:00.000Z",
-    endTime: "2025-03-15T11:00:00.000Z",
-    contactInfo: {
-      email: "client@example.com",
-      firstName: "John",
-      lastName: "Doe",
-      phone: "+12125551234",
-    },
-    timezone: "America/New_York",
-    notes: "Client is interested in discussing product options",
-  }),
-})
-  .then((response) => response.json())
-  .then((data) => console.log(data))
-  .catch((error) => console.error("Error:", error));
-```
-
-#### Using Python/Requests
-
-```python
-import requests
-import json
-
-url = "http://localhost:8000/book-appointment"
-headers = {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer YOUR_GHL_API_KEY"
-}
-payload = {
-    "calendarId": "YOUR_CALENDAR_ID",
-    "startTime": "2025-03-15T10:00:00.000Z",
-    "endTime": "2025-03-15T11:00:00.000Z",
-    "contactInfo": {
-        "email": "client@example.com",
-        "firstName": "John",
-        "lastName": "Doe",
-        "phone": "+12125551234"
-    },
-    "timezone": "America/New_York",
-    "notes": "Client is interested in discussing product options"
-}
-
-response = requests.post(url, headers=headers, json=payload)
-print(response.json())
-```
-
 #### Parameters
 
 1. **Required Parameters**:
@@ -295,55 +204,61 @@ print(response.json())
    - `notes`: Additional notes for the appointment
    - Additional contact fields in the `contactInfo` object (firstName, lastName, phone, etc.)
 
-#### Response Example
+## Dynamic Variables in Outbound Calling
 
-```json
-{
-  "requestId": "lq1ab3c7de",
-  "status": "success",
-  "message": "Appointment booked successfully",
-  "appointmentId": "app_12345678",
-  "details": {
-    "calendarId": "YOUR_CALENDAR_ID",
-    "startTime": "2025-03-15T10:00:00.000Z",
-    "endTime": "2025-03-15T11:00:00.000Z",
-    "timezone": "America/New_York",
-    "contact": {
-      "email": "client@example.com",
-      "name": "John Doe"
-    }
-  },
-  "notification": {
-    "message": "Contact has a phone number. You can use make-outbound-call to send a confirmation.",
-    "phone": "+12125551234"
-  }
-}
+The outbound calling system supports dynamic variables, allowing you to personalize AI agent interactions based on customer information. This enables more natural, context-aware conversations that improve engagement and effectiveness.
+
+### Smart Default Prompts
+
+If no custom prompt or first message is provided, the system generates personalized versions based on available customer information:
+
+1. **Default Prompt Template**: Incorporates the customer's name, job title, company, and city to create a context-aware prompt for the AI agent.
+
+2. **Default First Message**: Creates a personalized greeting using the customer's name while maintaining a professional introduction.
+
+Example of an automatically generated prompt:
+
+```
+You are a professional sales representative for EsplanadeAI.
+
+You're speaking with John Smith who works as a CTO at Acme Corp from San Francisco.
+
+Follow these guidelines during the call:
+1. Be warm, professional, and conversational
+...
 ```
 
-## API Reference
+Example of an automatically generated first message:
 
-### Configuration Endpoints
+```
+Hello John Smith! This is Alex from EsplanadeAI. I hope I caught you at a good time...
+```
 
-- `GET /config` - Get current configuration
-- `POST /config/twilio-credentials` - Set Twilio credentials
-- `POST /config/twilio-phone-numbers` - Add a Twilio phone number
-- `DELETE /config/twilio-phone-numbers/:phoneNumber` - Remove a phone number
-- `POST /config/elevenlabs-agents` - Add an ElevenLabs agent ID
-- `DELETE /config/elevenlabs-agents/:agentId` - Remove an agent ID
+## Troubleshooting
 
-### Call Management
+### Connection Issues
 
-- `POST /make-outbound-call` - Initiate an outbound call
-- `GET /active-calls` - Get list of active calls
-- `POST /call-status` - Handle Twilio call status callbacks
+If the WebSocket connection fails:
 
-### Calendar Management
+- Verify your ngrok URL is correct in Twilio settings
+- Check that your server is running and accessible
+- Ensure your firewall isn't blocking WebSocket connections
 
-- `POST /get-availability` - Check Go High Level calendar availability
-- `POST /book-appointment` - Book an appointment in Go High Level calendar
+### Audio Problems
 
-### Service Endpoints
+If there's no audio output:
 
-- `GET /` - Health check endpoint
-- `ALL /incoming-call-eleven` - Twilio webhook for call handling
-- `WebSocket /media-stream` - Media stream for Twilio calls
+- Confirm your ElevenLabs API key is valid
+- Verify the AGENT_ID is correct
+- Check audio format settings match Twilio's requirements (μ-law 8kHz)
+- In your ElevenLabs agent settings, navigate to the Voice section and select "μ-law 8000 Hz" for both input and output formats
+
+### Agent Configuration
+
+For optimal performance with Twilio:
+
+1. Navigate to your agent settings in ElevenLabs
+2. Go to the Voice section and select "μ-law 8000 Hz" from the dropdown
+3. Go to the Advanced section and select "μ-law 8000 Hz" for the input format
+4. In the security section, toggle on "Enable authentication"
+5. Toggle on "Enable overrides" for "First message" and "System prompt"
