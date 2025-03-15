@@ -1,10 +1,10 @@
+// Code for the server-side application
 import Fastify from "fastify";
 import WebSocket from "ws";
 import dotenv from "dotenv";
 import fastifyFormBody from "@fastify/formbody";
 import fastifyWs from "@fastify/websocket";
 import Twilio from "twilio";
-// Import fetch if using Node.js < 18
 import fetch from "node-fetch";
 
 // Load environment variables from .env file for default values
