@@ -13,8 +13,12 @@ dotenv.config();
 // Initialize config store for dynamic parameters
 const configStore = {
   // Default values from environment variables
-  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,
-  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN,
+  TWILIO_ACCOUNT_SID: process.env.TWILIO_AUTH_TOKEN
+    ? [process.env.TWILIO_ACCOUNT_SID]
+    : [],
+  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN
+    ? [process.env.TWILIO_AUTH_TOKEN]
+    : [],
   TWILIO_PHONE_NUMBERS: process.env.TWILIO_PHONE_NUMBER
     ? [process.env.TWILIO_PHONE_NUMBER]
     : [],
