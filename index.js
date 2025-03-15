@@ -59,8 +59,8 @@ async function getRepAvailability(
     timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   }
 
-  // API endpoint
-  const endpoint = `https://services.leadconnectorhq.com/calendars/${calendarId}/availability`;
+  // Updated API endpoint - Using the v2 calendar API
+  const endpoint = `https://services.leadconnectorhq.com/v2/calendar/${calendarId}/availability`;
 
   try {
     // Build the query parameters
@@ -70,14 +70,14 @@ async function getRepAvailability(
       timezone: timezone,
     });
 
-    // Make the HTTP request
+    // Make the HTTP request with updated version header
     const response = await fetch(`${endpoint}?${params.toString()}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
         "Content-Type": "application/json",
-        Version: "2021-07-28", // API version - update if needed
+        Version: "2023-07-01", // Updated API version
       },
     });
 
