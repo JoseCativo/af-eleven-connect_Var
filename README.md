@@ -149,23 +149,31 @@ curl http://localhost:8000/active-calls
 
 #### Using cURL
 ```bash
-curl "http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID" \
--H "Authorization: Bearer YOUR_GHL_API_KEY"
-```
-
-With optional parameters:
-```bash
-curl "http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID&startDate=2025-03-15&endDate=2025-03-22&timezone=America/New_York" \
--H "Authorization: Bearer YOUR_GHL_API_KEY"
+curl -X POST http://localhost:8000/get-availability \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer YOUR_GHL_API_KEY" \
+-d '{
+  "calendarId": "YOUR_CALENDAR_ID",
+  "startDate": "2025-03-15",
+  "endDate": "2025-03-22",
+  "timezone": "America/New_York"
+}'
 ```
 
 #### Using JavaScript/Fetch API
 ```javascript
-fetch('http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID', {
-  method: 'GET',
+fetch('http://localhost:8000/get-availability', {
+  method: 'POST',
   headers: {
+    'Content-Type': 'application/json',
     'Authorization': 'Bearer YOUR_GHL_API_KEY'
-  }
+  },
+  body: JSON.stringify({
+    calendarId: 'YOUR_CALENDAR_ID',
+    startDate: '2025-03-15',
+    endDate: '2025-03-22',
+    timezone: 'America/New_York'
+  })
 })
 .then(response => response.json())
 .then(data => console.log(data))
@@ -175,27 +183,31 @@ fetch('http://localhost:8000/get-availability?calendarId=YOUR_CALENDAR_ID', {
 #### Using Python/Requests
 ```python
 import requests
+import json
 
 url = "http://localhost:8000/get-availability"
-params = {
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer YOUR_GHL_API_KEY"
+}
+payload = {
     "calendarId": "YOUR_CALENDAR_ID",
     # Optional parameters
-    # "startDate": "2025-03-15",
-    # "endDate": "2025-03-22",
-    # "timezone": "America/New_York"
+    "startDate": "2025-03-15",
+    "endDate": "2025-03-22",
+    "timezone": "America/New_York"
 }
-headers = {"Authorization": "Bearer YOUR_GHL_API_KEY"}
 
-response = requests.get(url, params=params, headers=headers)
+response = requests.post(url, headers=headers, json=payload)
 print(response.json())
 ```
 
 #### Parameters
 1. **Required Parameters**:
-   - `calendarId`: The Go High Level calendar ID to check for availability (query parameter)
+   - `calendarId`: The Go High Level calendar ID
    - `Authorization`: Bearer token with your Go High Level API key (header)
 
-2. **Optional Parameters** (all as query parameters):
+2. **Optional Parameters**:
    - `startDate`: Start date for availability search (YYYY-MM-DD format, defaults to today)
    - `endDate`: End date for availability search (YYYY-MM-DD format, defaults to 7 days from today)
    - `timezone`: Timezone for the availability slots (defaults to system timezone)
@@ -273,7 +285,7 @@ payload = {
     "notes": "Client is interested in discussing product options"
 }
 
-response = requests.post(url, headers=headers, data=json.dumps(payload))
+response = requests.post(url, headers=headers, json=payload)
 print(response.json())
 ```
 
@@ -330,7 +342,7 @@ print(response.json())
 - `POST /call-status` - Handle Twilio call status callbacks
 
 ### Calendar Management
-- `GET /get-availability` - Check Go High Level calendar availability
+- `POST /get-availability` - Check Go High Level calendar availability
 - `POST /book-appointment` - Book an appointment in Go High Level calendar
 
 ### Service Endpoints

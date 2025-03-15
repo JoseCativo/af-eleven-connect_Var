@@ -59,26 +59,28 @@ async function getRepAvailability(
     timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   }
 
-  // Updated API endpoint - Using the v2 calendar API
-  const endpoint = `https://services.leadconnectorhq.com/v2/calendar/${calendarId}/availability`;
+  // API endpoint from official documentation
+  const endpoint = `https://services.leadconnectorhq.com/calendars/availability`;
 
   try {
-    // Build the query parameters
-    const params = new URLSearchParams({
+    // Build the request body per the documentation
+    const requestBody = {
+      calendarId: calendarId,
       startDate: startDate,
       endDate: endDate,
       timezone: timezone,
-    });
+    };
 
-    // Make the HTTP request with updated version header
-    const response = await fetch(`${endpoint}?${params.toString()}`, {
-      method: "GET",
+    // Make the HTTP request with the updated approach
+    const response = await fetch(endpoint, {
+      method: "POST", // Note: Using POST instead of GET based on docs
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
         "Content-Type": "application/json",
-        Version: "2023-07-01", // Updated API version
+        Version: "2021-07-28",
       },
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -114,7 +116,7 @@ async function bookGHLAppointment(
   contactInfo,
   timezone
 ) {
-  // API endpoint
+  // API endpoint per documentation
   const endpoint = `https://services.leadconnectorhq.com/appointments/`;
 
   try {
@@ -136,7 +138,7 @@ async function bookGHLAppointment(
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
         "Content-Type": "application/json",
-        Version: "2021-07-28", // API version - update if needed
+        Version: "2021-07-28",
       },
       body: JSON.stringify(appointmentData),
     });
