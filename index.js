@@ -537,7 +537,6 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     console.log(`[Error: No ElevenLabs agents configured`);
     return reply.status(500).send({
       error: "No ElevenLabs agents have been configured",
-      requestId,
       resolution: "Add an agent using the /config/elevenlabs-agents endpoint",
     });
   }
@@ -590,7 +589,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       url: webhookUrl,
       to: to,
       from: fromNumber,
-      statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
+      statusCallback: `https://${request.headers.host}/call-status`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
       timeout: 15, // 15 second timeout for ringing
