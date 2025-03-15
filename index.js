@@ -13,12 +13,8 @@ dotenv.config();
 // Initialize config store for dynamic parameters
 const configStore = {
   // Default values from environment variables
-  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID
-    ? [process.env.TWILIO_ACCOUNT_SID]
-    : [],
-  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN
-    ? [process.env.TWILIO_AUTH_TOKEN]
-    : [],
+  TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID || "",
+  TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || "",
   TWILIO_PHONE_NUMBERS: process.env.TWILIO_PHONE_NUMBER
     ? [process.env.TWILIO_PHONE_NUMBER]
     : [],
@@ -201,7 +197,7 @@ fastify.post("/config/twilio-credentials", async (request, reply) => {
     const testClient = Twilio(accountSid, authToken);
     await testClient.api.accounts(accountSid).fetch();
 
-    // If successful, update the config
+    // If successful, update the config as strings (not arrays)
     configStore.TWILIO_ACCOUNT_SID = accountSid;
     configStore.TWILIO_AUTH_TOKEN = authToken;
 
@@ -220,7 +216,6 @@ fastify.post("/config/twilio-credentials", async (request, reply) => {
     });
   }
 });
-
 // API to add a Twilio phone number
 fastify.post("/config/twilio-phone-numbers", async (request, reply) => {
   const { phoneNumber } = request.body;
