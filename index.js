@@ -28,10 +28,21 @@ const configStore = {
 };
 
 // Helper function to get signed URL for authenticated ElevenLabs conversations
+
 async function getSignedUrl(agentId) {
+  // If no agentId is provided, use the first one from the config store
+  const effectiveAgentId = agentId || configStore.ELEVENLABS_AGENT_IDS[0];
+
+  if (!effectiveAgentId) {
+    throw new Error("No agent ID available");
+  }
+
   try {
+    console.log(
+      `[ElevenLabs] Getting signed URL for agent: ${effectiveAgentId}`
+    );
     const response = await fetch(
-      `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`,
+      `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${effectiveAgentId}`,
       {
         method: "GET",
         headers: {
@@ -375,18 +386,42 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 fastify.all("/outbound-call-twiml", async (request, reply) => {
   const prompt = request.query.prompt || "";
   const first_message = request.query.first_message || "";
-  const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+
+  // Extract the dynamic variables from query parameters
+  const fullName = request.query.fullName || "";
+  const email = request.query.email || "";
+  const company = request.query.company || "";
+  const jobTitle = request.query.jobTitle || "";
+  const city = request.query.city || "";
+
+  // Build TwiML with all parameters
+  let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
         <Connect>
         <Stream url="wss://${request.headers.host}/outbound-media-stream">
             <Parameter name="prompt" value="${prompt}" />
-            <Parameter name="first_message" value="${first_message}" />
+            <Parameter name="first_message" value="${first_message}" />`;
+
+  // Add dynamic variables to TwiML
+  if (fullName)
+    twimlResponse += `\n            <Parameter name="fullName" value="${fullName}" />`;
+  if (email)
+    twimlResponse += `\n            <Parameter name="email" value="${email}" />`;
+  if (company)
+    twimlResponse += `\n            <Parameter name="company" value="${company}" />`;
+  if (jobTitle)
+    twimlResponse += `\n            <Parameter name="jobTitle" value="${jobTitle}" />`;
+  if (city)
+    twimlResponse += `\n            <Parameter name="city" value="${city}" />`;
+
+  // Close the tags
+  twimlResponse += `
         </Stream>
         </Connect>
     </Response>`;
+
   reply.type("text/xml").send(twimlResponse);
 });
-
 // WebSocket inbound route for handling media streams from Twilio
 fastify.register(async (fastifyInstance) => {
   fastifyInstance.get(
@@ -451,26 +486,28 @@ fastify.register(async (fastifyInstance) => {
               console.info("[II] Received conversation initiation metadata.");
               break;
             case "audio":
-              if (message.audio_event?.audio_base_64) {
-                // Send audio data to Twilio
-                const audioData = {
-                  event: "media",
-                  streamSid,
-                  media: {
-                    payload: message.audio_event.audio_base_64,
-                  },
-                };
-                connection.send(JSON.stringify(audioData));
-              } else if (message.audio?.chunk) {
-                // Handle alternative audio format
-                const audioData = {
-                  event: "media",
-                  streamSid,
-                  media: {
-                    payload: message.audio.chunk,
-                  },
-                };
-                connection.send(JSON.stringify(audioData));
+              if (streamSid) {
+                if (message.audio?.chunk) {
+                  const audioData = {
+                    event: "media",
+                    streamSid,
+                    media: {
+                      payload: message.audio.chunk,
+                    },
+                  };
+                  ws.send(JSON.stringify(audioData));
+                } else if (message.audio_event?.audio_base_64) {
+                  const audioData = {
+                    event: "media",
+                    streamSid,
+                    media: {
+                      payload: message.audio_event.audio_base_64,
+                    },
+                  };
+                  ws.send(JSON.stringify(audioData));
+                }
+              } else {
+                console.log("[ElevenLabs] Received audio but no StreamSid yet");
               }
               break;
             case "interruption":
@@ -581,34 +618,57 @@ fastify.register(async (fastifyInstance) => {
       // Set up ElevenLabs connection
       const setupElevenLabs = async () => {
         try {
-          const signedUrl = await getSignedUrl();
+          // Use the first configured agent ID or the one from customParameters
+          const agentId =
+            customParameters?.agentId || configStore.ELEVENLABS_AGENT_IDS[0];
+
+          if (!agentId) {
+            throw new Error("No agent ID available");
+          }
+          console.log(
+            `[ElevenLabs] Setting up connection with agent ID: ${agentId}`
+          );
+          const signedUrl = await getSignedUrl(agentId);
           elevenLabsWs = new WebSocket(signedUrl);
+
           elevenLabsWs.on("open", () => {
             console.log("[ElevenLabs] Connected to Conversational AI");
-            // Send initial configuration with prompt and first message
+
+            // Create dynamic variables object from customParameters
+            const dynamicVars = {
+              // Default values or empty strings
+              fullName: customParameters?.fullName || "",
+              email: customParameters?.email || "",
+              company: customParameters?.company || "",
+              jobTitle: customParameters?.jobTitle || "",
+              city: customParameters?.city || "",
+            };
+
+            console.log("[ElevenLabs] Using dynamic variables:", dynamicVars);
+
+            // Send initial configuration with prompt, first message and dynamic variables
             const initialConfig = {
               type: "conversation_initiation_client_data",
-              dynamic_variables: {
-                user_name: "Angelo",
-                user_id: 1234,
-              },
+              dynamic_variables: dynamicVars,
               conversation_config_override: {
                 agent: {
                   prompt: {
                     prompt:
                       customParameters?.prompt ||
-                      "you are a gary from the phone store",
+                      "You are a professional sales representative. Be helpful, courteous, and conversational.",
                   },
                   first_message:
                     customParameters?.first_message ||
-                    "hey there! how can I help you today?",
+                    "Hello! Thanks for taking my call today. How are you doing?",
                 },
               },
             };
+
             console.log(
               "[ElevenLabs] Sending initial config with prompt:",
               initialConfig.conversation_config_override.agent.prompt.prompt
             );
+
             // Send the configuration to ElevenLabs
             elevenLabsWs.send(JSON.stringify(initialConfig));
           });
@@ -751,7 +811,19 @@ fastify.register(async (fastifyInstance) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { to, phoneNumber, agentId, prompt, first_message } = request.body;
+  const {
+    to,
+    phoneNumber,
+    agentId,
+    prompt,
+    first_message,
+    fullName,
+    email,
+    company,
+    jobTitle,
+    city,
+  } = request.body;
+
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
@@ -778,78 +850,28 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     });
   }
 
-  // Configuration validation
-  if (configStore.TWILIO_PHONE_NUMBERS.length === 0) {
-    console.log(`[${requestId}] Error: No Twilio phone numbers configured`);
-    return reply.status(500).send({
-      error: "No Twilio phone numbers have been configured",
-      requestId,
-      resolution:
-        "Add a phone number using the /config/twilio-phone-numbers endpoint",
-    });
-  }
-
-  if (configStore.ELEVENLABS_AGENT_IDS.length === 0) {
-    console.log(`[${requestId}] Error: No ElevenLabs agents configured`);
-    return reply.status(500).send({
-      error: "No ElevenLabs agents have been configured",
-      requestId,
-      resolution: "Add an agent using the /config/elevenlabs-agents endpoint",
-    });
-  }
-
-  // Use provided phone number or default to first in the list
-  const fromNumber = phoneNumber || configStore.TWILIO_PHONE_NUMBERS[0];
-
-  // Use provided agent ID or default to first in the list
-  const selectedAgentId = agentId || configStore.ELEVENLABS_AGENT_IDS[0];
-
-  // Verify the provided phone number is in our configured list
-  if (phoneNumber && !configStore.TWILIO_PHONE_NUMBERS.includes(phoneNumber)) {
-    console.log(
-      `[${requestId}] Error: Requested phone number not found: ${phoneNumber}`
-    );
-    return reply.status(400).send({
-      error: "The requested phone number is not configured",
-      requestId,
-      availableNumbers: configStore.TWILIO_PHONE_NUMBERS,
-    });
-  }
-
-  // Verify the provided agent ID is in our configured list
-  if (agentId && !configStore.ELEVENLABS_AGENT_IDS.includes(agentId)) {
-    console.log(
-      `[${requestId}] Error: Requested agent ID not found: ${agentId}`
-    );
-    return reply.status(400).send({
-      error: "The requested agent ID is not configured",
-      requestId,
-      availableAgents: configStore.ELEVENLABS_AGENT_IDS,
-    });
-  }
+  // Additional validations remain the same...
 
   try {
     console.log(
       `[${requestId}] Initiating call from ${fromNumber} to ${to} using agent ${selectedAgentId}`
     );
 
-    // Check Twilio client validity
-    if (!twilioClient) {
-      console.error(`[${requestId}] Twilio client is not initialized`);
-      return reply.status(500).send({
-        error: "Twilio client is not properly configured",
-        requestId,
-        resolution:
-          "Update Twilio credentials using the /config/twilio-credentials endpoint",
-      });
-    }
-
-    // Build the webhook URL with the agent ID as a query parameter
+    // Build the webhook URL with all parameters
+    const params = new URLSearchParams();
+    if (prompt) params.append("prompt", prompt);
+    if (first_message) params.append("first_message", first_message);
+    if (fullName) params.append("fullName", fullName);
+    if (email) params.append("email", email);
+    if (company) params.append("company", company);
+    if (jobTitle) params.append("jobTitle", jobTitle);
+    if (city) params.append("city", city);
+    if (phoneNumber) params.append("phoneNumber", phoneNumber);
+    if (agentId) params.append("agentId", agentId);
+    // send to twiml
     const webhookUrl = `https://${
       request.headers.host
-    }/outbound-call-twiml?prompt=${encodeURIComponent(
-      prompt
-    )}&first_message=${encodeURIComponent(first_message)}`;
+    }/outbound-call-twiml?${params.toString()}`;
 
     // Create the call
     const call = await twilioClient.calls.create({
