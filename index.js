@@ -340,14 +340,11 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
     return reply.status(500).send("No ElevenLabs agents configured");
   }
 
-  // Extract the agent ID from the request or use the first one
-  const agentId = request.query.agentId || configStore.ELEVENLABS_AGENT_IDS[0];
-
   // Generate TwiML response to connect the call to a WebSocket stream
   const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
       <Connect>
-        <Stream url="wss://${request.headers.host}/media-stream?agentId=${agentId}" />
+        <Stream url="wss://${request.headers.host}/media-stream" />
       </Connect>
     </Response>`;
 
@@ -503,40 +500,48 @@ fastify.register(async (fastifyInstance) => {
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
   const { to, phoneNumber, agentId } = request.body;
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
-  console.log(`Outbound call request received`);
+  console.log(`[${requestId}] Outbound call request received`);
 
   // Input validation
   if (!to) {
-    console.log(`Error: Destination phone number missing`);
+    console.log(`[${requestId}] Error: Destination phone number missing`);
     return reply.status(400).send({
       error: "Destination phone number is required",
+      requestId,
     });
   }
 
   // Validate phone number format (basic E.164 check)
   const phoneRegex = /^\+[1-9]\d{1,14}$/;
   if (!phoneRegex.test(to)) {
-    console.log(`Error: Invalid destination phone format: ${to}`);
+    console.log(
+      `[${requestId}] Error: Invalid destination phone format: ${to}`
+    );
     return reply.status(400).send({
       error: "Phone number must be in E.164 format (e.g., +12125551234)",
+      requestId,
     });
   }
 
-  // no number found
+  // Configuration validation
   if (configStore.TWILIO_PHONE_NUMBERS.length === 0) {
-    console.log(` Error: No Twilio phone numbers configured`);
+    console.log(`[${requestId}] Error: No Twilio phone numbers configured`);
     return reply.status(500).send({
       error: "No Twilio phone numbers have been configured",
+      requestId,
       resolution:
         "Add a phone number using the /config/twilio-phone-numbers endpoint",
     });
   }
-  // no id found
+
   if (configStore.ELEVENLABS_AGENT_IDS.length === 0) {
-    console.log(`[Error: No ElevenLabs agents configured`);
+    console.log(`[${requestId}] Error: No ElevenLabs agents configured`);
     return reply.status(500).send({
       error: "No ElevenLabs agents have been configured",
+      requestId,
       resolution: "Add an agent using the /config/elevenlabs-agents endpoint",
     });
   }
@@ -549,68 +554,62 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 
   // Verify the provided phone number is in our configured list
   if (phoneNumber && !configStore.TWILIO_PHONE_NUMBERS.includes(phoneNumber)) {
-    console.log(`Error: Requested phone number not found: ${phoneNumber}`);
+    console.log(
+      `[${requestId}] Error: Requested phone number not found: ${phoneNumber}`
+    );
     return reply.status(400).send({
       error: "The requested phone number is not configured",
+      requestId,
       availableNumbers: configStore.TWILIO_PHONE_NUMBERS,
     });
   }
 
   // Verify the provided agent ID is in our configured list
   if (agentId && !configStore.ELEVENLABS_AGENT_IDS.includes(agentId)) {
-    console.log(`Error: Requested agent ID not found: ${agentId}`);
+    console.log(
+      `[${requestId}] Error: Requested agent ID not found: ${agentId}`
+    );
     return reply.status(400).send({
       error: "The requested agent ID is not configured",
+      requestId,
       availableAgents: configStore.ELEVENLABS_AGENT_IDS,
     });
   }
 
-  // CALLl
   try {
     console.log(
-      `Initiating call from ${fromNumber} to ${to} using agent ${selectedAgentId}`
+      `[${requestId}] Initiating call from ${fromNumber} to ${to} using agent ${selectedAgentId}`
     );
 
     // Build the webhook URL with the agent ID as a query parameter
-    const webhookUrl = `https://${request.headers.host}/incoming-call-eleven`;
+    const webhookUrl = `https://${request.headers.host}/incoming-call-eleven?agentId=${selectedAgentId}`;
 
     // Check Twilio client validity
     if (!twilioClient) {
-      console.error(`Twilio client is not initialized`);
+      console.error(`[${requestId}] Twilio client is not initialized`);
       return reply.status(500).send({
         error: "Twilio client is not properly configured",
+        requestId,
         resolution:
           "Update Twilio credentials using the /config/twilio-credentials endpoint",
       });
     }
 
-    // Create the call with a timeout
-    const callPromise = twilioClient.calls.create({
+    // Create the call
+    const call = await twilioClient.calls.create({
       url: webhookUrl,
       to: to,
       from: fromNumber,
-      statusCallback: `https://${request.headers.host}/call-status`,
-      statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
-      statusCallbackMethod: "POST",
-      timeout: 15, // 15 second timeout for ringing
     });
 
-    // Add a timeout to the promise
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(
-        () => reject(new Error("Call request timed out after 10 seconds")),
-        10000
-      );
-    });
-
-    // Race the call promise against the timeout
-    const call = await Promise.race([callPromise, timeoutPromise]);
-
-    console.log(`Outbound call initiated successfully: ${call.sid}`);
+    console.log(
+      `[${requestId}] Outbound call initiated successfully: ${call.sid}`
+    );
 
     // Track the call in our application
     const callData = {
       callSid: call.sid,
+      requestId,
       to,
       fromNumber,
       agentId: selectedAgentId,
@@ -629,10 +628,11 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       callSid: call.sid,
       agentId: selectedAgentId,
       fromNumber,
+      requestId,
     });
   } catch (error) {
     // Detailed error handling based on the type of error
-    console.error(` Error initiating call:`, error);
+    console.error(`[${requestId}] Error initiating call:`, error);
 
     let statusCode = 500;
     let errorMessage = "Failed to initiate call";
@@ -675,16 +675,13 @@ fastify.post("/make-outbound-call", async (request, reply) => {
           resolution = "Try again after some time";
           break;
       }
-    } else if (error.message.includes("timed out")) {
-      statusCode = 504;
-      errorMessage = "Request timed out";
-      resolution = "Try again or check Twilio service status";
     }
 
     reply.status(statusCode).send({
       error: errorMessage,
       details: errorDetails,
       resolution,
+      requestId,
     });
   }
 });
