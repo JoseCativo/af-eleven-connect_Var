@@ -483,11 +483,6 @@ fastify.register(async (fastifyInstance) => {
               },
             };
 
-            console.log(
-              "[ElevenLabs] Sending initial config with prompt:",
-              initialConfig.conversation_config_override.agent.prompt.prompt
-            );
-
             // Send the configuration to ElevenLabs
             elevenLabsWs.send(JSON.stringify(initialConfig));
           });
@@ -579,9 +574,9 @@ fastify.register(async (fastifyInstance) => {
           const data = JSON.parse(message);
           switch (data.event) {
             case "start":
-              streamSid = msg.start.streamSid;
-              callSid = msg.start.callSid;
-              customParameters = msg.start.customParameters; // Store parameters
+              streamSid = message.start.streamSid;
+              callSid = message.start.callSid;
+              customParameters = message.start.customParameters; // Store parameters
               console.log(`[Twilio] Stream started with ID: ${streamSid}`);
               break;
             case "media":
