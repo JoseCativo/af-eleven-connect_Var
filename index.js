@@ -918,15 +918,16 @@ fastify.post("/get-info", async (request, reply) => {
   // TODO: In the future, you could perform a lookup here based on caller_id
   // For example, query a CRM to get customer information
 
+  const dynamic_variables = {
+    fullName: "Paul Giovanatto",
+    email: "paulgiovanatto@gmail.com",
+    company: "Affinity Design",
+    jobTitle: "CEO",
+    city: "Toronto",
+  };
   // For now, return placeholder data
   const response = {
-    dynamic_variables: {
-      fullName: "Paul Giovanatto",
-      email: "paulgiovanatto@gmail.com",
-      company: "Affinity Design",
-      jobTitle: "CEO",
-      city: "Toronto",
-    },
+    dynamic_variables: dynamic_variables,
     conversation_config_override: {
       agent: {
         first_message: `Hi ${dynamic_variables.fullName}, how can I help you today?`,
