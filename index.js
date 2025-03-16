@@ -532,7 +532,7 @@ fastify.register(async (fastifyInstance) => {
                         payload: message.audio_event.audio_base_64,
                       },
                     };
-                    connection.send(JSON.stringify(audioData));
+                    ws.send(JSON.stringify(audioData));
 
                     break;
                   } else {
@@ -599,43 +599,28 @@ fastify.register(async (fastifyInstance) => {
       // Handle messages from Twilio
       ws.on("message", async (message) => {
         try {
-          const msg = JSON.parse(message);
-          if (msg.event !== "media") {
-            console.log(`[Twilio] Received event: ${msg.event}`);
-          }
-
-          switch (msg.event) {
+          const data = JSON.parse(message);
+          switch (data.event) {
             case "start":
-              streamSid = msg.start.streamSid;
-              callSid = msg.start.callSid;
-              customParameters = msg.start.customParameters; // Store parameters
-              console.log(
-                `[Twilio] Stream started - StreamSid: ${streamSid}, CallSid: ${callSid}`
-              );
-              console.log("[Twilio] Start parameters:", customParameters);
+              streamSid = data.start.streamSid;
+              console.log(`[Twilio] Stream started with ID: ${streamSid}`);
               break;
-
             case "media":
-              if (elevenLabsWs?.readyState === WebSocket.OPEN) {
+              if (elevenLabsWs.readyState === WebSocket.OPEN) {
                 const audioMessage = {
                   user_audio_chunk: Buffer.from(
-                    msg.media.payload,
+                    data.media.payload,
                     "base64"
                   ).toString("base64"),
                 };
                 elevenLabsWs.send(JSON.stringify(audioMessage));
               }
               break;
-
             case "stop":
-              console.log(`[Twilio] Stream ${streamSid} ended`);
-              if (elevenLabsWs?.readyState === WebSocket.OPEN) {
-                elevenLabsWs.close();
-              }
+              elevenLabsWs.close();
               break;
-
             default:
-              console.log(`[Twilio] Unhandled event: ${msg.event}`);
+              console.log(`[Twilio] Received unhandled event: ${data.event}`);
           }
         } catch (error) {
           console.error("[Twilio] Error processing message:", error);
@@ -648,6 +633,12 @@ fastify.register(async (fastifyInstance) => {
         if (elevenLabsWs?.readyState === WebSocket.OPEN) {
           elevenLabsWs.close();
         }
+      });
+
+      // Handle WebSocket closure
+      ws.on("error", () => {
+        console.error("[Twilio] WebSocket error:", error);
+        elevenLabsWs.close();
       });
     }
   );
