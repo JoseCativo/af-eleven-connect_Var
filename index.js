@@ -191,10 +191,10 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 });
 
 // Start the Fastify server
-fastify.listen({ port: PORT }, (err) => {
+fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
     console.error("Error starting server:", err);
     process.exit(1);
   }
-  console.log(`[Server] Listening on port ${PORT}`);
+  console.log(`[Server] Listening on port ${PORT} on all interfaces`);
 });
