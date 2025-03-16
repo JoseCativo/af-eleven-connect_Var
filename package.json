@@ -4,9 +4,13 @@
   "description": "Integration of Eleven Labs Conversational AI with Twilio for phone calls",
   "main": "index.js",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "build": "echo 'Build step completed'"
   },
   "dependencies": {
     "@fastify/formbody": "^7.4.0",
@@ -16,8 +20,5 @@
     "node-fetch": "^3.3.2",
     "twilio": "^4.18.0",
     "ws": "^8.14.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
