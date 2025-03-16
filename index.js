@@ -386,12 +386,6 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
   const prompt = request.query.prompt || "";
   const first_message = request.query.first_message || "";
   const agentId = request.query.agentId || "";
-  // Extract the dynamic variables from query parameters
-  const fullName = request.query.fullName || "";
-  const email = request.query.email || "";
-  const company = request.query.company || "";
-  const jobTitle = request.query.jobTitle || "";
-  const city = request.query.city || "";
 
   // Build TwiML with all parameters
   let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
@@ -400,22 +394,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
         <Stream url="wss://${request.headers.host}/outbound-media-stream">
             <Parameter name="prompt" value="${prompt}" />
             <Parameter name="first_message" value="${first_message}" /> 
-            <Parameter name="agentId" value="${agentId}" />`;
-
-  // Add dynamic variables to TwiML
-  if (fullName)
-    twimlResponse += `\n            <Parameter name="fullName" value="${fullName}" />`;
-  if (email)
-    twimlResponse += `\n            <Parameter name="email" value="${email}" />`;
-  if (company)
-    twimlResponse += `\n            <Parameter name="company" value="${company}" />`;
-  if (jobTitle)
-    twimlResponse += `\n            <Parameter name="jobTitle" value="${jobTitle}" />`;
-  if (city)
-    twimlResponse += `\n            <Parameter name="city" value="${city}" />`;
-
-  // Close the tags
-  twimlResponse += `
+            <Parameter name="agentId" value="${agentId}" />
         </Stream>
         </Connect>
     </Response>`;
@@ -425,18 +404,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const {
-    to,
-    phoneNumber,
-    agentId,
-    prompt,
-    first_message,
-    fullName,
-    email,
-    company,
-    jobTitle,
-    city,
-  } = request.body;
+  const { to, phoneNumber, agentId } = request.body;
 
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -468,20 +436,14 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 
   try {
     console.log(
-      `[${requestId}] Initiating call from ${fromNumber} to ${to} using agent ${selectedAgentId}`
+      `[${requestId}] Initiating call from ${phoneNumber} to ${to} using agent ${selectedAgentId}`
     );
 
     // Build the webhook URL with all parameters
     const params = new URLSearchParams();
-    if (prompt) params.append("prompt", prompt);
-    if (first_message) params.append("first_message", first_message);
-    if (fullName) params.append("fullName", fullName);
-    if (email) params.append("email", email);
-    if (company) params.append("company", company);
-    if (jobTitle) params.append("jobTitle", jobTitle);
-    if (city) params.append("city", city);
     if (phoneNumber) params.append("phoneNumber", phoneNumber);
     if (agentId) params.append("agentId", agentId);
+
     // send to twiml
     const webhookUrl = `https://${
       request.headers.host
@@ -608,10 +570,10 @@ fastify.post("/get-info", async (request, reply) => {
     conversation_config_override: {
       agent: {
         first_message: "Hi John, how can I help you today?",
-        prompt: {
-          prompt:
-            "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
-        },
+        //   prompt: {
+        //     prompt:
+        //       "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
+        //   },
       },
     },
   };
