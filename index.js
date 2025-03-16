@@ -451,7 +451,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     const call = await twilioClient.calls.create({
       url: webhookUrl,
       to: to,
-      from: fromNumber,
+      from: phoneNumber,
       statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
