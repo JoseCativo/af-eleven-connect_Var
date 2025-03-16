@@ -475,6 +475,18 @@ fastify.register(async (fastifyInstance) => {
             req.query.agentId ||
             configStore.ELEVENLABS_AGENT_IDS[0];
 
+          console.log(
+            "[DEBUG]",
+            "customagent",
+            customParameters?.agentId,
+            "req agent",
+            req.query.agentId,
+            "default agent",
+            configStore.ELEVENLABS_AGENT_IDS[0],
+            "all custom",
+            { customParameters }
+          );
+
           if (!agentId) {
             throw new Error("No agent ID available");
           }
@@ -742,11 +754,11 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
   const { to, phoneNumber, agentId, first_message } = request.body;
-
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
   console.log(`[${requestId}] Outbound call request received`);
+
+  // I would like to call the local
 
   // Input validation
   if (!to) {
@@ -756,8 +768,6 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       requestId,
     });
   }
-
-  // Validate phone number format (basic E.164 check)
   const phoneRegex = /^\+[1-9]\d{1,14}$/;
   if (!phoneRegex.test(to)) {
     console.log(
@@ -769,7 +779,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     });
   }
 
-  // Additional validations remain the same...
+  // Make the call
 
   try {
     console.log(
@@ -911,7 +921,7 @@ fastify.post("/get-info", async (request, reply) => {
   // For now, return placeholder data
   const response = {
     dynamic_variables: {
-      fullName: "John Doe",
+      fullName: "Paul Giovanatto",
       email: "paulgiovanatto@gmail.com",
       company: "Affinity Design",
       jobTitle: "CEO",
@@ -919,7 +929,7 @@ fastify.post("/get-info", async (request, reply) => {
     },
     conversation_config_override: {
       agent: {
-        first_message: "Hi John, how can I help you today?",
+        first_message: `Hi ${dynamic_variables.fullName}, how can I help you today?`,
         //   prompt: {
         //     prompt:
         //       "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
