@@ -2,16 +2,13 @@
   "name": "eleven-labs-outbound-caller",
   "version": "1.0.0",
   "description": "Integration of Eleven Labs Conversational AI with Twilio for phone calls",
-  "main": "server.js",
+  "main": "index.js",
   "type": "module",
   "engines": {
     "node": "18.x"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch index.js",
-    "vercel-build": "echo 'Build step completed'",
-    "build": "echo 'Build step completed'"
+    "start": "node index.js"
   },
   "dependencies": {
     "@fastify/formbody": "^7.4.0",
