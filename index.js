@@ -214,11 +214,48 @@ let twilioClient = new Twilio(
 
 const PORT = process.env.PORT || 8000;
 
+// Config routes ///////////////////////////////////////
+
 // Root route for health check
 fastify.get("/", async (_, reply) => {
   reply.send({ message: "Server is running" });
 });
+// API to get all configuration
+fastify.get("/config", async (request, reply) => {
+  reply.send({
+    twilioPhoneNumbers: configStore.TWILIO_PHONE_NUMBERS,
+    elevenLabsAgentIds: configStore.ELEVENLABS_AGENT_IDS,
+    activeConnections: Array.from(configStore.activeConnections.keys()).length,
+  });
+});
+// API to configure elevin labs agents credentials
+fastify.post("/config/elevenlabs-agents", async (request, reply) => {
+  const { agentId, description } = request.body;
 
+  if (!agentId) {
+    return reply.status(400).send({
+      error: "Agent ID is required",
+    });
+  }
+
+  try {
+    // We'd ideally validate the agent ID with ElevenLabs API
+    // For now, just add it to our config
+    if (!configStore.ELEVENLABS_AGENT_IDS.includes(agentId)) {
+      configStore.ELEVENLABS_AGENT_IDS.push(agentId);
+    }
+
+    reply.send({
+      success: true,
+      agentIds: configStore.ELEVENLABS_AGENT_IDS,
+    });
+  } catch (error) {
+    reply.status(500).send({
+      error: "Failed to add agent ID",
+      details: error.message,
+    });
+  }
+});
 // API to configure Twilio credentials
 fastify.post("/config/twilio-credentials", async (request, reply) => {
   const { accountSid, authToken } = request.body;
@@ -291,7 +328,6 @@ fastify.post("/config/twilio-phone-numbers", async (request, reply) => {
     });
   }
 });
-
 // API to remove a Twilio phone number
 fastify.delete(
   "/config/twilio-phone-numbers/:phoneNumber",
@@ -312,36 +348,6 @@ fastify.delete(
     }
   }
 );
-
-// API to add an ElevenLabs agent
-fastify.post("/config/elevenlabs-agents", async (request, reply) => {
-  const { agentId, description } = request.body;
-
-  if (!agentId) {
-    return reply.status(400).send({
-      error: "Agent ID is required",
-    });
-  }
-
-  try {
-    // We'd ideally validate the agent ID with ElevenLabs API
-    // For now, just add it to our config
-    if (!configStore.ELEVENLABS_AGENT_IDS.includes(agentId)) {
-      configStore.ELEVENLABS_AGENT_IDS.push(agentId);
-    }
-
-    reply.send({
-      success: true,
-      agentIds: configStore.ELEVENLABS_AGENT_IDS,
-    });
-  } catch (error) {
-    reply.status(500).send({
-      error: "Failed to add agent ID",
-      details: error.message,
-    });
-  }
-});
-
 // API to remove an ElevenLabs agent
 fastify.delete("/config/elevenlabs-agents/:agentId", async (request, reply) => {
   const { agentId } = request.params;
@@ -360,14 +366,7 @@ fastify.delete("/config/elevenlabs-agents/:agentId", async (request, reply) => {
   }
 });
 
-// API to get all configuration
-fastify.get("/config", async (request, reply) => {
-  reply.send({
-    twilioPhoneNumbers: configStore.TWILIO_PHONE_NUMBERS,
-    elevenLabsAgentIds: configStore.ELEVENLABS_AGENT_IDS,
-    activeConnections: Array.from(configStore.activeConnections.keys()).length,
-  });
-});
+// API routes ///////////////////////////////////////
 
 // Route to handle incoming calls from Twilio
 fastify.all("/incoming-call-eleven", async (request, reply) => {
@@ -386,7 +385,7 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 fastify.all("/outbound-call-twiml", async (request, reply) => {
   const prompt = request.query.prompt || "";
   const first_message = request.query.first_message || "";
-
+  const agentId = request.query.agentId || "";
   // Extract the dynamic variables from query parameters
   const fullName = request.query.fullName || "";
   const email = request.query.email || "";
@@ -400,7 +399,8 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
         <Connect>
         <Stream url="wss://${request.headers.host}/outbound-media-stream">
             <Parameter name="prompt" value="${prompt}" />
-            <Parameter name="first_message" value="${first_message}" />`;
+            <Parameter name="first_message" value="${first_message}" /> 
+            <Parameter name="agentId" value="${agentId}" />`;
 
   // Add dynamic variables to TwiML
   if (fullName)
@@ -422,7 +422,475 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
 
   reply.type("text/xml").send(twimlResponse);
 });
-// WebSocket inbound route for handling media streams from Twilio
+
+// Route to initiate an outbound call
+fastify.post("/make-outbound-call", async (request, reply) => {
+  const {
+    to,
+    phoneNumber,
+    agentId,
+    prompt,
+    first_message,
+    fullName,
+    email,
+    company,
+    jobTitle,
+    city,
+  } = request.body;
+
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
+  console.log(`[${requestId}] Outbound call request received`);
+
+  // Input validation
+  if (!to) {
+    console.log(`[${requestId}] Error: Destination phone number missing`);
+    return reply.status(400).send({
+      error: "Destination phone number is required",
+      requestId,
+    });
+  }
+
+  // Validate phone number format (basic E.164 check)
+  const phoneRegex = /^\+[1-9]\d{1,14}$/;
+  if (!phoneRegex.test(to)) {
+    console.log(
+      `[${requestId}] Error: Invalid destination phone format: ${to}`
+    );
+    return reply.status(400).send({
+      error: "Phone number must be in E.164 format (e.g., +12125551234)",
+      requestId,
+    });
+  }
+
+  // Additional validations remain the same...
+
+  try {
+    console.log(
+      `[${requestId}] Initiating call from ${fromNumber} to ${to} using agent ${selectedAgentId}`
+    );
+
+    // Build the webhook URL with all parameters
+    const params = new URLSearchParams();
+    if (prompt) params.append("prompt", prompt);
+    if (first_message) params.append("first_message", first_message);
+    if (fullName) params.append("fullName", fullName);
+    if (email) params.append("email", email);
+    if (company) params.append("company", company);
+    if (jobTitle) params.append("jobTitle", jobTitle);
+    if (city) params.append("city", city);
+    if (phoneNumber) params.append("phoneNumber", phoneNumber);
+    if (agentId) params.append("agentId", agentId);
+    // send to twiml
+    const webhookUrl = `https://${
+      request.headers.host
+    }/outbound-call-twiml?${params.toString()}`;
+
+    // Create the call
+    const call = await twilioClient.calls.create({
+      url: webhookUrl,
+      to: to,
+      from: fromNumber,
+      statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
+      statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+      statusCallbackMethod: "POST",
+    });
+
+    console.log(
+      `[${requestId}] Outbound call initiated successfully: ${call.sid}`
+    );
+
+    // Track the call in our application
+    const callData = {
+      callSid: call.sid,
+      requestId,
+      to,
+      fromNumber,
+      agentId: selectedAgentId,
+      startTime: new Date(),
+      status: "initiated",
+    };
+
+    // Store call data (could be expanded to a proper database)
+    if (!configStore.callHistory) {
+      configStore.callHistory = new Map();
+    }
+    configStore.callHistory.set(call.sid, callData);
+
+    reply.send({
+      success: true,
+      message: "Call initiated successfully",
+      callSid: call.sid,
+    });
+  } catch (error) {
+    // Detailed error handling based on the type of error
+    console.error(`[${requestId}] Error initiating call:`, error);
+
+    let statusCode = 500;
+    let errorMessage = "Failed to initiate call";
+    let errorDetails = error.message;
+    let resolution = null;
+
+    // Handle specific Twilio error codes
+    if (error.code) {
+      switch (error.code) {
+        case 21211:
+          statusCode = 400;
+          errorMessage = "Invalid 'To' phone number";
+          resolution = "Check the phone number format and try again";
+          break;
+        case 21214:
+          statusCode = 400;
+          errorMessage = "Invalid 'From' phone number";
+          resolution =
+            "Verify the Twilio phone number is active and properly configured";
+          break;
+        case 20404:
+          statusCode = 404;
+          errorMessage = "Twilio account not found or unauthorized";
+          resolution = "Check your Twilio account credentials";
+          break;
+        case 20003:
+          statusCode = 403;
+          errorMessage = "Permission denied";
+          resolution =
+            "Verify that your Twilio account has voice capabilities enabled";
+          break;
+        case 13223:
+          statusCode = 402;
+          errorMessage = "Insufficient funds";
+          resolution = "Add funds to your Twilio account";
+          break;
+        case 13224:
+          statusCode = 429;
+          errorMessage = "Rate limit exceeded";
+          resolution = "Try again after some time";
+          break;
+      }
+    }
+
+    reply.status(statusCode).send({
+      error: errorMessage,
+      details: errorDetails,
+      resolution,
+      requestId,
+    });
+  }
+});
+
+// New endpoint to serve personalized data for inbound calls TODO test
+fastify.post("/get-info", async (request, reply) => {
+  const { caller_id, agent_id, called_number, call_sid } = request.body;
+
+  // Generate a request ID for tracking
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
+  console.log(`[${requestId}] Webhook called for personalization data`);
+  console.log(`[${requestId}] Caller ID: ${caller_id || "unknown"}`);
+  console.log(`[${requestId}] Agent ID: ${agent_id || "unknown"}`);
+  console.log(`[${requestId}] Called Number: ${called_number || "unknown"}`);
+  console.log(`[${requestId}] Call SID: ${call_sid || "unknown"}`);
+
+  // TODO: In the future, you could perform a lookup here based on caller_id
+  // For example, query a CRM to get customer information
+
+  // For now, return placeholder data
+  const response = {
+    dynamic_variables: {
+      fullName: "John Doe",
+      email: "paulgiovanatto@gmail.com",
+      company: "Affinity Design",
+      jobTitle: "CEO",
+      city: "Toronto",
+    },
+    conversation_config_override: {
+      agent: {
+        first_message: "Hi John, how can I help you today?",
+        prompt: {
+          prompt:
+            "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
+        },
+      },
+    },
+  };
+
+  // Log the response for debugging
+  console.log(`[${requestId}] Returning personalization data`);
+
+  reply.send(response);
+});
+
+// Route to get a representative's availability
+fastify.get("/get-availability", async (request, reply) => {
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  console.log(`[${requestId}] Get availability request received`);
+
+  // Extract the calendar ID from query parameters
+  const { calendarId, startDate, endDate, timezone } = request.query;
+
+  // Extract API key from authorization header
+  const apiKey = request.headers.authorization?.replace("Bearer ", "");
+
+  // Validate required parameters
+  if (!calendarId) {
+    console.log(`[${requestId}] Error: Missing calendar ID parameter`);
+    return reply.status(400).send({
+      error: "Calendar ID is required",
+      requestId,
+    });
+  }
+
+  if (!apiKey) {
+    console.log(`[${requestId}] Error: Missing authorization header`);
+    return reply.status(401).send({
+      error: "Authorization header with Bearer token is required",
+      requestId,
+    });
+  }
+
+  try {
+    console.log(
+      `[${requestId}] Fetching availability for calendar: ${calendarId}`
+    );
+
+    // Call the function to get availability
+    const availability = await getRepAvailability(
+      calendarId,
+      apiKey,
+      startDate,
+      endDate,
+      timezone
+    );
+
+    // Format and return the availability data
+    const formattedAvailability = {
+      requestId,
+      calendarId,
+      dateRange: {
+        start: startDate || new Date().toISOString().split("T")[0],
+        end:
+          endDate ||
+          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .split("T")[0],
+      },
+      timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      availability: availability,
+    };
+
+    console.log(`[${requestId}] Successfully retrieved availability`);
+    reply.send(formattedAvailability);
+  } catch (error) {
+    console.error(`[${requestId}] Error getting availability:`, error);
+
+    // Handle different types of errors
+    if (error.message.includes("HTTP error!")) {
+      // Extract status code if present in the error message
+      const statusMatch = error.message.match(/Status: (\d+)/);
+      const status = statusMatch ? parseInt(statusMatch[1]) : 500;
+
+      return reply.status(status).send({
+        error: "Failed to fetch availability from Go High Level",
+        details: error.message,
+        requestId,
+      });
+    }
+
+    reply.status(500).send({
+      error: "Failed to get availability",
+      details: error.message,
+      requestId,
+    });
+  }
+});
+
+// Route to book an appointment
+fastify.post("/book-appointment", async (request, reply) => {
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  console.log(`[${requestId}] Book appointment request received`);
+
+  // Extract API key from authorization header
+  const apiKey = request.headers.authorization?.replace("Bearer ", "");
+
+  // Extract appointment details from request body
+  const { calendarId, startTime, endTime, contactInfo, timezone, notes } =
+    request.body;
+
+  // Validate required parameters
+  if (!calendarId) {
+    console.log(`[${requestId}] Error: Missing calendar ID parameter`);
+    return reply.status(400).send({
+      error: "Calendar ID is required",
+      requestId,
+    });
+  }
+
+  if (!startTime || !endTime) {
+    console.log(`[${requestId}] Error: Missing start or end time`);
+    return reply.status(400).send({
+      error: "Both startTime and endTime are required",
+      requestId,
+    });
+  }
+
+  if (!contactInfo || !contactInfo.email) {
+    console.log(`[${requestId}] Error: Missing contact information`);
+    return reply.status(400).send({
+      error: "Contact information with at least an email is required",
+      requestId,
+    });
+  }
+
+  if (!apiKey) {
+    console.log(`[${requestId}] Error: Missing authorization header`);
+    return reply.status(401).send({
+      error: "Authorization header with Bearer token is required",
+      requestId,
+    });
+  }
+
+  try {
+    console.log(
+      `[${requestId}] Booking appointment for calendar: ${calendarId}`
+    );
+
+    // Enhance contact info with notes if provided
+    const enhancedContactInfo = {
+      ...contactInfo,
+    };
+
+    if (notes) {
+      enhancedContactInfo.notes = notes;
+    }
+
+    // Add caller ID for later reference
+    enhancedContactInfo.externalId = requestId;
+
+    // Book the appointment
+    const appointmentResult = await bookGHLAppointment(
+      calendarId,
+      apiKey,
+      startTime,
+      endTime,
+      enhancedContactInfo,
+      timezone
+    );
+
+    // Format and return the booking data
+    const bookingResponse = {
+      requestId,
+      status: "success",
+      message: "Appointment booked successfully",
+      appointmentId: appointmentResult.id || appointmentResult.appointmentId,
+      details: {
+        calendarId,
+        startTime,
+        endTime,
+        timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+        contact: {
+          email: contactInfo.email,
+          name:
+            contactInfo.name ||
+            contactInfo.firstName + " " + (contactInfo.lastName || ""),
+        },
+      },
+    };
+
+    // If we have a phone integration configured, we could trigger a call to confirm
+    if (
+      configStore.TWILIO_PHONE_NUMBERS.length > 0 &&
+      configStore.ELEVENLABS_AGENT_IDS.length > 0 &&
+      contactInfo.phone
+    ) {
+      // Log that we could make a confirmation call
+      console.log(
+        `[${requestId}] Could notify ${contactInfo.phone} about appointment confirmation`
+      );
+
+      // Add notification info to response
+      bookingResponse.notification = {
+        message:
+          "Contact has a phone number. You can use make-outbound-call to send a confirmation.",
+        phone: contactInfo.phone,
+      };
+    }
+
+    console.log(`[${requestId}] Successfully booked appointment`);
+    reply.send(bookingResponse);
+  } catch (error) {
+    console.error(`[${requestId}] Error booking appointment:`, error);
+
+    // Handle different types of errors
+    if (error.message.includes("HTTP error!")) {
+      // Extract status code if present in the error message
+      const statusMatch = error.message.match(/Status: (\d+)/);
+      const status = statusMatch ? parseInt(statusMatch[1]) : 500;
+
+      // Common booking errors
+      if (
+        error.message.includes("already booked") ||
+        error.message.includes("unavailable")
+      ) {
+        return reply.status(409).send({
+          error: "Time slot is no longer available",
+          details: error.message,
+          requestId,
+        });
+      }
+
+      if (
+        error.message.includes("invalid calendar") ||
+        error.message.includes("not found")
+      ) {
+        return reply.status(404).send({
+          error: "Calendar not found or invalid",
+          details: error.message,
+          requestId,
+        });
+      }
+
+      return reply.status(status).send({
+        error: "Failed to book appointment in Go High Level",
+        details: error.message,
+        requestId,
+      });
+    }
+
+    reply.status(500).send({
+      error: "Failed to book appointment",
+      details: error.message,
+      requestId,
+    });
+  }
+});
+
+// Endpoint to handle Twilio status callbacks
+fastify.post("/call-status", async (request, reply) => {
+  const { CallSid, CallStatus, CallDuration } = request.body;
+  const requestId = request.query.requestId || "unknown";
+
+  console.log(`[${requestId}] Call status update: ${CallSid} -> ${CallStatus}`);
+
+  // Update call data if we're tracking it
+  if (configStore.callHistory && configStore.callHistory.has(CallSid)) {
+    const callData = configStore.callHistory.get(CallSid);
+    callData.status = CallStatus;
+    if (CallDuration) {
+      callData.duration = parseInt(CallDuration);
+    }
+    configStore.callHistory.set(CallSid, callData);
+  }
+
+  reply.send({ success: true });
+});
+
+// WebSocket routes ///////////////////////////////////////
+
+// TODO WebSocket inbound route for handling media streams from Twilio
 fastify.register(async (fastifyInstance) => {
   fastifyInstance.get(
     "/media-stream",
@@ -807,428 +1275,6 @@ fastify.register(async (fastifyInstance) => {
       });
     }
   );
-});
-
-// Route to initiate an outbound call
-fastify.post("/make-outbound-call", async (request, reply) => {
-  const {
-    to,
-    phoneNumber,
-    agentId,
-    prompt,
-    first_message,
-    fullName,
-    email,
-    company,
-    jobTitle,
-    city,
-  } = request.body;
-
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
-  console.log(`[${requestId}] Outbound call request received`);
-
-  // Input validation
-  if (!to) {
-    console.log(`[${requestId}] Error: Destination phone number missing`);
-    return reply.status(400).send({
-      error: "Destination phone number is required",
-      requestId,
-    });
-  }
-
-  // Validate phone number format (basic E.164 check)
-  const phoneRegex = /^\+[1-9]\d{1,14}$/;
-  if (!phoneRegex.test(to)) {
-    console.log(
-      `[${requestId}] Error: Invalid destination phone format: ${to}`
-    );
-    return reply.status(400).send({
-      error: "Phone number must be in E.164 format (e.g., +12125551234)",
-      requestId,
-    });
-  }
-
-  // Additional validations remain the same...
-
-  try {
-    console.log(
-      `[${requestId}] Initiating call from ${fromNumber} to ${to} using agent ${selectedAgentId}`
-    );
-
-    // Build the webhook URL with all parameters
-    const params = new URLSearchParams();
-    if (prompt) params.append("prompt", prompt);
-    if (first_message) params.append("first_message", first_message);
-    if (fullName) params.append("fullName", fullName);
-    if (email) params.append("email", email);
-    if (company) params.append("company", company);
-    if (jobTitle) params.append("jobTitle", jobTitle);
-    if (city) params.append("city", city);
-    if (phoneNumber) params.append("phoneNumber", phoneNumber);
-    if (agentId) params.append("agentId", agentId);
-    // send to twiml
-    const webhookUrl = `https://${
-      request.headers.host
-    }/outbound-call-twiml?${params.toString()}`;
-
-    // Create the call
-    const call = await twilioClient.calls.create({
-      url: webhookUrl,
-      to: to,
-      from: fromNumber,
-      statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
-      statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
-      statusCallbackMethod: "POST",
-    });
-
-    console.log(
-      `[${requestId}] Outbound call initiated successfully: ${call.sid}`
-    );
-
-    // Track the call in our application
-    const callData = {
-      callSid: call.sid,
-      requestId,
-      to,
-      fromNumber,
-      agentId: selectedAgentId,
-      startTime: new Date(),
-      status: "initiated",
-    };
-
-    // Store call data (could be expanded to a proper database)
-    if (!configStore.callHistory) {
-      configStore.callHistory = new Map();
-    }
-    configStore.callHistory.set(call.sid, callData);
-
-    reply.send({
-      success: true,
-      message: "Call initiated successfully",
-      callSid: call.sid,
-    });
-  } catch (error) {
-    // Detailed error handling based on the type of error
-    console.error(`[${requestId}] Error initiating call:`, error);
-
-    let statusCode = 500;
-    let errorMessage = "Failed to initiate call";
-    let errorDetails = error.message;
-    let resolution = null;
-
-    // Handle specific Twilio error codes
-    if (error.code) {
-      switch (error.code) {
-        case 21211:
-          statusCode = 400;
-          errorMessage = "Invalid 'To' phone number";
-          resolution = "Check the phone number format and try again";
-          break;
-        case 21214:
-          statusCode = 400;
-          errorMessage = "Invalid 'From' phone number";
-          resolution =
-            "Verify the Twilio phone number is active and properly configured";
-          break;
-        case 20404:
-          statusCode = 404;
-          errorMessage = "Twilio account not found or unauthorized";
-          resolution = "Check your Twilio account credentials";
-          break;
-        case 20003:
-          statusCode = 403;
-          errorMessage = "Permission denied";
-          resolution =
-            "Verify that your Twilio account has voice capabilities enabled";
-          break;
-        case 13223:
-          statusCode = 402;
-          errorMessage = "Insufficient funds";
-          resolution = "Add funds to your Twilio account";
-          break;
-        case 13224:
-          statusCode = 429;
-          errorMessage = "Rate limit exceeded";
-          resolution = "Try again after some time";
-          break;
-      }
-    }
-
-    reply.status(statusCode).send({
-      error: errorMessage,
-      details: errorDetails,
-      resolution,
-      requestId,
-    });
-  }
-});
-
-// Route to get a representative's availability
-fastify.get("/get-availability", async (request, reply) => {
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  console.log(`[${requestId}] Get availability request received`);
-
-  // Extract the calendar ID from query parameters
-  const { calendarId, startDate, endDate, timezone } = request.query;
-
-  // Extract API key from authorization header
-  const apiKey = request.headers.authorization?.replace("Bearer ", "");
-
-  // Validate required parameters
-  if (!calendarId) {
-    console.log(`[${requestId}] Error: Missing calendar ID parameter`);
-    return reply.status(400).send({
-      error: "Calendar ID is required",
-      requestId,
-    });
-  }
-
-  if (!apiKey) {
-    console.log(`[${requestId}] Error: Missing authorization header`);
-    return reply.status(401).send({
-      error: "Authorization header with Bearer token is required",
-      requestId,
-    });
-  }
-
-  try {
-    console.log(
-      `[${requestId}] Fetching availability for calendar: ${calendarId}`
-    );
-
-    // Call the function to get availability
-    const availability = await getRepAvailability(
-      calendarId,
-      apiKey,
-      startDate,
-      endDate,
-      timezone
-    );
-
-    // Format and return the availability data
-    const formattedAvailability = {
-      requestId,
-      calendarId,
-      dateRange: {
-        start: startDate || new Date().toISOString().split("T")[0],
-        end:
-          endDate ||
-          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .split("T")[0],
-      },
-      timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-      availability: availability,
-    };
-
-    console.log(`[${requestId}] Successfully retrieved availability`);
-    reply.send(formattedAvailability);
-  } catch (error) {
-    console.error(`[${requestId}] Error getting availability:`, error);
-
-    // Handle different types of errors
-    if (error.message.includes("HTTP error!")) {
-      // Extract status code if present in the error message
-      const statusMatch = error.message.match(/Status: (\d+)/);
-      const status = statusMatch ? parseInt(statusMatch[1]) : 500;
-
-      return reply.status(status).send({
-        error: "Failed to fetch availability from Go High Level",
-        details: error.message,
-        requestId,
-      });
-    }
-
-    reply.status(500).send({
-      error: "Failed to get availability",
-      details: error.message,
-      requestId,
-    });
-  }
-});
-
-// Route to book an appointment
-fastify.post("/book-appointment", async (request, reply) => {
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  console.log(`[${requestId}] Book appointment request received`);
-
-  // Extract API key from authorization header
-  const apiKey = request.headers.authorization?.replace("Bearer ", "");
-
-  // Extract appointment details from request body
-  const { calendarId, startTime, endTime, contactInfo, timezone, notes } =
-    request.body;
-
-  // Validate required parameters
-  if (!calendarId) {
-    console.log(`[${requestId}] Error: Missing calendar ID parameter`);
-    return reply.status(400).send({
-      error: "Calendar ID is required",
-      requestId,
-    });
-  }
-
-  if (!startTime || !endTime) {
-    console.log(`[${requestId}] Error: Missing start or end time`);
-    return reply.status(400).send({
-      error: "Both startTime and endTime are required",
-      requestId,
-    });
-  }
-
-  if (!contactInfo || !contactInfo.email) {
-    console.log(`[${requestId}] Error: Missing contact information`);
-    return reply.status(400).send({
-      error: "Contact information with at least an email is required",
-      requestId,
-    });
-  }
-
-  if (!apiKey) {
-    console.log(`[${requestId}] Error: Missing authorization header`);
-    return reply.status(401).send({
-      error: "Authorization header with Bearer token is required",
-      requestId,
-    });
-  }
-
-  try {
-    console.log(
-      `[${requestId}] Booking appointment for calendar: ${calendarId}`
-    );
-
-    // Enhance contact info with notes if provided
-    const enhancedContactInfo = {
-      ...contactInfo,
-    };
-
-    if (notes) {
-      enhancedContactInfo.notes = notes;
-    }
-
-    // Add caller ID for later reference
-    enhancedContactInfo.externalId = requestId;
-
-    // Book the appointment
-    const appointmentResult = await bookGHLAppointment(
-      calendarId,
-      apiKey,
-      startTime,
-      endTime,
-      enhancedContactInfo,
-      timezone
-    );
-
-    // Format and return the booking data
-    const bookingResponse = {
-      requestId,
-      status: "success",
-      message: "Appointment booked successfully",
-      appointmentId: appointmentResult.id || appointmentResult.appointmentId,
-      details: {
-        calendarId,
-        startTime,
-        endTime,
-        timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-        contact: {
-          email: contactInfo.email,
-          name:
-            contactInfo.name ||
-            contactInfo.firstName + " " + (contactInfo.lastName || ""),
-        },
-      },
-    };
-
-    // If we have a phone integration configured, we could trigger a call to confirm
-    if (
-      configStore.TWILIO_PHONE_NUMBERS.length > 0 &&
-      configStore.ELEVENLABS_AGENT_IDS.length > 0 &&
-      contactInfo.phone
-    ) {
-      // Log that we could make a confirmation call
-      console.log(
-        `[${requestId}] Could notify ${contactInfo.phone} about appointment confirmation`
-      );
-
-      // Add notification info to response
-      bookingResponse.notification = {
-        message:
-          "Contact has a phone number. You can use make-outbound-call to send a confirmation.",
-        phone: contactInfo.phone,
-      };
-    }
-
-    console.log(`[${requestId}] Successfully booked appointment`);
-    reply.send(bookingResponse);
-  } catch (error) {
-    console.error(`[${requestId}] Error booking appointment:`, error);
-
-    // Handle different types of errors
-    if (error.message.includes("HTTP error!")) {
-      // Extract status code if present in the error message
-      const statusMatch = error.message.match(/Status: (\d+)/);
-      const status = statusMatch ? parseInt(statusMatch[1]) : 500;
-
-      // Common booking errors
-      if (
-        error.message.includes("already booked") ||
-        error.message.includes("unavailable")
-      ) {
-        return reply.status(409).send({
-          error: "Time slot is no longer available",
-          details: error.message,
-          requestId,
-        });
-      }
-
-      if (
-        error.message.includes("invalid calendar") ||
-        error.message.includes("not found")
-      ) {
-        return reply.status(404).send({
-          error: "Calendar not found or invalid",
-          details: error.message,
-          requestId,
-        });
-      }
-
-      return reply.status(status).send({
-        error: "Failed to book appointment in Go High Level",
-        details: error.message,
-        requestId,
-      });
-    }
-
-    reply.status(500).send({
-      error: "Failed to book appointment",
-      details: error.message,
-      requestId,
-    });
-  }
-});
-
-// Endpoint to handle Twilio status callbacks
-fastify.post("/call-status", async (request, reply) => {
-  const { CallSid, CallStatus, CallDuration } = request.body;
-  const requestId = request.query.requestId || "unknown";
-
-  console.log(`[${requestId}] Call status update: ${CallSid} -> ${CallStatus}`);
-
-  // Update call data if we're tracking it
-  if (configStore.callHistory && configStore.callHistory.has(CallSid)) {
-    const callData = configStore.callHistory.get(CallSid);
-    callData.status = CallStatus;
-    if (CallDuration) {
-      callData.duration = parseInt(CallDuration);
-    }
-    configStore.callHistory.set(CallSid, callData);
-  }
-
-  reply.send({ success: true });
 });
 
 // Start the Fastify server
