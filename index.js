@@ -466,7 +466,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       callSid: call.sid,
       requestId,
       to,
-      fromNumber,
+      phoneNumber,
       agentId: agentId,
       startTime: new Date(),
       status: "initiated",
@@ -547,11 +547,7 @@ fastify.post("/get-info", async (request, reply) => {
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
-  console.log(`[${requestId}] Webhook called for personalization data`);
-  console.log(`[${requestId}] Caller ID: ${caller_id || "unknown"}`);
-  console.log(`[${requestId}] Agent ID: ${agent_id || "unknown"}`);
-  console.log(`[${requestId}] Called Number: ${called_number || "unknown"}`);
-  console.log(`[${requestId}] Call SID: ${call_sid || "unknown"}`);
+  console.log(`get info endpoint: ${request.body}`);
 
   // TODO: In the future, you could perform a lookup here based on caller_id
   // For example, query a CRM to get customer information
