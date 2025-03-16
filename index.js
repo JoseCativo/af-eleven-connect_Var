@@ -1030,18 +1030,8 @@ fastify.register(async (fastifyInstance) => {
 });
 
 // WebSocket outbound route for handling media streams from Twilio
+// WebSocket outbound route for handling media streams from Twilio
 fastify.register(async (fastifyInstance) => {
-  const response = await fetch(`https://${request.headers.host}/get-info`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-
-  const rsp = await response.json();
-
-  console.info(`get info: ${rsp}`);
-
   fastifyInstance.get(
     "/outbound-media-stream",
     { websocket: true },
@@ -1051,13 +1041,45 @@ fastify.register(async (fastifyInstance) => {
       let streamSid = null;
       let callSid = null;
       let elevenLabsWs = null;
-      let customParameters = { rsp }; // Add this to store parameters
+      let customParameters = null; // Initialize as null, will be populated later
+      let personalInfo = null; // Store info from get-info endpoint
 
       // Handle WebSocket errors
       ws.on("error", console.error);
+
       // Set up ElevenLabs connection
       const setupElevenLabs = async () => {
         try {
+          // Try to get personalized information
+          try {
+            // Use the req object to get the host
+            const host = req.headers.host;
+            const response = await fetch(`https://${host}/get-info`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                caller_id: customParameters?.caller_id || "",
+                called_number: customParameters?.called_number || "",
+                call_sid: callSid || "",
+              }),
+            });
+
+            if (response.ok) {
+              personalInfo = await response.json();
+              console.info(
+                `[INFO] Personalization data: ${JSON.stringify(personalInfo)}`
+              );
+            }
+          } catch (infoError) {
+            console.error(
+              "[INFO] Error fetching personalization data:",
+              infoError
+            );
+            // Continue even if get-info fails
+          }
+
           // Use the first configured agent ID or the one from customParameters
           const agentId =
             customParameters?.agentId || configStore.ELEVENLABS_AGENT_IDS[0];
@@ -1074,15 +1096,31 @@ fastify.register(async (fastifyInstance) => {
           elevenLabsWs.on("open", () => {
             console.log("[ElevenLabs] Connected to Conversational AI");
 
-            // Send initial configuration with prompt, first message and dynamic variables
+            // Combine personalInfo with customParameters if available
+            const dynamicVars = personalInfo?.dynamic_variables || {
+              fullName: customParameters?.fullName || "Customer",
+              email: customParameters?.email || "",
+              company: customParameters?.company || "",
+              jobTitle: customParameters?.jobTitle || "",
+              city: customParameters?.city || "",
+            };
+
+            // Create the config with all available information
             const initialConfig = {
               type: "conversation_initiation_client_data",
-              customParameters,
+              dynamic_variables: dynamicVars,
+              conversation_config_override:
+                personalInfo?.conversation_config_override || {
+                  agent: {
+                    first_message: customParameters?.first_message,
+                  },
+                },
             };
 
             console.log(
               "[ElevenLabs] Sending initial config with prompt:",
-              initialConfig.conversation_config_override.agent.prompt.prompt
+              initialConfig.conversation_config_override.agent.prompt?.prompt ||
+                "No prompt specified"
             );
 
             // Send the configuration to ElevenLabs
