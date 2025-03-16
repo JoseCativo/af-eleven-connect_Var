@@ -471,30 +471,25 @@ fastify.register(async (fastifyInstance) => {
           elevenLabsWs.on("open", () => {
             console.log("[ElevenLabs] Connected to Conversational AI");
 
-            // Send initial configuration with prompt and first message
-            // const initialConfig = {
-            //   type: "conversation_initiation_client_data",
-            //   conversation_config_override: {
-            //     agent: {
-            //       prompt: {
-            //         prompt:
-            //           customParameters?.prompt ||
-            //           "you are a gary from the phone store",
-            //       },
-            //       first_message:
-            //         customParameters?.first_message ||
-            //         "hey there! how can I help you today?",
-            //     },
-            //   },
-            // };
+            //    TODO Send initial configuration with prompt and first message
+            const initialConfig = {
+              type: "conversation_initiation_client_data",
+              conversation_config_override: {
+                agent: {
+                  first_message:
+                    customParameters?.first_message ||
+                    "hey there! how can I help you today?",
+                },
+              },
+            };
 
-            // console.log(
-            //   "[ElevenLabs] Sending initial config with prompt:",
-            //   initialConfig.conversation_config_override.agent.prompt.prompt
-            // );
+            console.log(
+              "[ElevenLabs] Sending initial config with prompt:",
+              initialConfig.conversation_config_override.agent.prompt.prompt
+            );
 
-            // // Send the configuration to ElevenLabs
-            // elevenLabsWs.send(JSON.stringify(initialConfig));
+            // Send the configuration to ElevenLabs
+            elevenLabsWs.send(JSON.stringify(initialConfig));
           });
 
           elevenLabsWs.on("message", (data) => {
@@ -504,24 +499,6 @@ fastify.register(async (fastifyInstance) => {
               switch (message.type) {
                 case "conversation_initiation_metadata":
                   console.log("[ElevenLabs] Received initiation metadata");
-                  break;
-                case "start":
-                  streamSid = data.start.streamSid;
-                  console.log(`[Twilio] Stream started with ID: ${streamSid}`);
-                  break;
-                case "media":
-                  if (elevenLabsWs.readyState === WebSocket.OPEN) {
-                    const audioMessage = {
-                      user_audio_chunk: Buffer.from(
-                        data.media.payload,
-                        "base64"
-                      ).toString("base64"),
-                    };
-                    elevenLabsWs.send(JSON.stringify(audioMessage));
-                  }
-                  break;
-                case "stop":
-                  elevenLabsWs.close();
                   break;
                 case "audio":
                   if (message.audio_event?.audio_base_64) {
@@ -602,7 +579,9 @@ fastify.register(async (fastifyInstance) => {
           const data = JSON.parse(message);
           switch (data.event) {
             case "start":
-              streamSid = data.start.streamSid;
+              streamSid = msg.start.streamSid;
+              callSid = msg.start.callSid;
+              customParameters = msg.start.customParameters; // Store parameters
               console.log(`[Twilio] Stream started with ID: ${streamSid}`);
               break;
             case "media":
@@ -659,22 +638,6 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
   reply.type("text/xml").send(twimlResponse);
 });
 
-// Route to handle outbound calls from Twilio
-fastify.all("/outbound-call-twiml", async (request, reply) => {
-  const first_message = request.query.first_message || "";
-
-  const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Connect>
-          <Stream url="wss://${request.headers.host}/outbound-media-stream">
-            <Parameter name="first_message" value="${first_message}" />
-          </Stream>
-        </Connect>
-      </Response>`;
-
-  reply.type("text/xml").send(twimlResponse);
-});
-
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
   const { to, phoneNumber, agentId, first_message } = request.body;
@@ -721,7 +684,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     // send to twiml
     const webhookUrl = `https://${
       request.headers.host
-    }/outbound-call-twiml?${params.toString()}`;
+    }/outbound-call-twiml?first_message=${encodeURIComponent(first_message)}`;
 
     // Create the call
     const call = await twilioClient.calls.create({
@@ -813,6 +776,22 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       requestId,
     });
   }
+});
+
+// Route to handle outbound calls from Twilio
+fastify.all("/outbound-call-twiml", async (request, reply) => {
+  const first_message = request.query.first_message || "";
+
+  const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+      <Response>
+        <Connect>
+          <Stream url="wss://${request.headers.host}/outbound-media-stream">
+            <Parameter name="first_message" value="${first_message}" />
+          </Stream>
+        </Connect>
+      </Response>`;
+
+  reply.type("text/xml").send(twimlResponse);
 });
 
 // New endpoint to serve personalized data for inbound calls TODO test
