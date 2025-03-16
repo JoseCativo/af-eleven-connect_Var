@@ -472,29 +472,29 @@ fastify.register(async (fastifyInstance) => {
             console.log("[ElevenLabs] Connected to Conversational AI");
 
             // Send initial configuration with prompt and first message
-            const initialConfig = {
-              type: "conversation_initiation_client_data",
-              conversation_config_override: {
-                agent: {
-                  prompt: {
-                    prompt:
-                      customParameters?.prompt ||
-                      "you are a gary from the phone store",
-                  },
-                  first_message:
-                    customParameters?.first_message ||
-                    "hey there! how can I help you today?",
-                },
-              },
-            };
+            // const initialConfig = {
+            //   type: "conversation_initiation_client_data",
+            //   conversation_config_override: {
+            //     agent: {
+            //       prompt: {
+            //         prompt:
+            //           customParameters?.prompt ||
+            //           "you are a gary from the phone store",
+            //       },
+            //       first_message:
+            //         customParameters?.first_message ||
+            //         "hey there! how can I help you today?",
+            //     },
+            //   },
+            // };
 
-            console.log(
-              "[ElevenLabs] Sending initial config with prompt:",
-              initialConfig.conversation_config_override.agent.prompt.prompt
-            );
+            // console.log(
+            //   "[ElevenLabs] Sending initial config with prompt:",
+            //   initialConfig.conversation_config_override.agent.prompt.prompt
+            // );
 
-            // Send the configuration to ElevenLabs
-            elevenLabsWs.send(JSON.stringify(initialConfig));
+            // // Send the configuration to ElevenLabs
+            // elevenLabsWs.send(JSON.stringify(initialConfig));
           });
 
           elevenLabsWs.on("message", (data) => {
@@ -505,35 +505,42 @@ fastify.register(async (fastifyInstance) => {
                 case "conversation_initiation_metadata":
                   console.log("[ElevenLabs] Received initiation metadata");
                   break;
-
+                case "start":
+                  streamSid = data.start.streamSid;
+                  console.log(`[Twilio] Stream started with ID: ${streamSid}`);
+                  break;
+                case "media":
+                  if (elevenLabsWs.readyState === WebSocket.OPEN) {
+                    const audioMessage = {
+                      user_audio_chunk: Buffer.from(
+                        data.media.payload,
+                        "base64"
+                      ).toString("base64"),
+                    };
+                    elevenLabsWs.send(JSON.stringify(audioMessage));
+                  }
+                  break;
+                case "stop":
+                  elevenLabsWs.close();
+                  break;
                 case "audio":
-                  if (streamSid) {
-                    if (message.audio?.chunk) {
-                      const audioData = {
-                        event: "media",
-                        streamSid,
-                        media: {
-                          payload: message.audio.chunk,
-                        },
-                      };
-                      ws.send(JSON.stringify(audioData));
-                    } else if (message.audio_event?.audio_base_64) {
-                      const audioData = {
-                        event: "media",
-                        streamSid,
-                        media: {
-                          payload: message.audio_event.audio_base_64,
-                        },
-                      };
-                      ws.send(JSON.stringify(audioData));
-                    }
+                  if (message.audio_event?.audio_base_64) {
+                    const audioData = {
+                      event: "media",
+                      streamSid,
+                      media: {
+                        payload: message.audio_event.audio_base_64,
+                      },
+                    };
+                    connection.send(JSON.stringify(audioData));
+
+                    break;
                   } else {
                     console.log(
                       "[ElevenLabs] Received audio but no StreamSid yet"
                     );
                   }
                   break;
-
                 case "interruption":
                   if (streamSid) {
                     ws.send(
@@ -544,7 +551,6 @@ fastify.register(async (fastifyInstance) => {
                     );
                   }
                   break;
-
                 case "ping":
                   if (message.ping_event?.event_id) {
                     elevenLabsWs.send(
@@ -555,19 +561,16 @@ fastify.register(async (fastifyInstance) => {
                     );
                   }
                   break;
-
                 case "agent_response":
                   console.log(
                     `[Twilio] Agent response: ${message.agent_response_event?.agent_response}`
                   );
                   break;
-
                 case "user_transcript":
                   console.log(
                     `[Twilio] User transcript: ${message.user_transcription_event?.user_transcript}`
                   );
                   break;
-
                 default:
                   console.log(
                     `[ElevenLabs] Unhandled message type: ${message.type}`
@@ -594,7 +597,7 @@ fastify.register(async (fastifyInstance) => {
       setupElevenLabs();
 
       // Handle messages from Twilio
-      ws.on("message", (message) => {
+      ws.on("message", async (message) => {
         try {
           const msg = JSON.parse(message);
           if (msg.event !== "media") {
