@@ -1,21 +1,25 @@
 {
-  "name": "11labs_outbound",
+  "name": "eleven-labs-outbound-caller",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "description": "Integration of Eleven Labs Conversational AI with Twilio for phone calls",
+  "main": "server.js",
   "type": "module",
-  "description": "",
+  "engines": {
+    "node": "18.x"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch index.js",
+    "vercel-build": "echo 'Build step completed'",
+    "build": "echo 'Build step completed'"
+  },
   "dependencies": {
-    "@fastify/formbody": "^8.0.2",
-    "@fastify/websocket": "^11.0.2",
-    "dotenv": "^16.4.7",
-    "fastify": "^5.2.1",
-    "twilio": "^5.4.2",
-    "ws": "^8.18.0"
+    "@fastify/formbody": "^7.4.0",
+    "@fastify/websocket": "^8.2.0",
+    "dotenv": "^16.3.1",
+    "fastify": "^4.23.2",
+    "node-fetch": "^3.3.2",
+    "twilio": "^4.18.0",
+    "ws": "^8.14.2"
   }
 }
