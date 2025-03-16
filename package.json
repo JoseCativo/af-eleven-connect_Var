@@ -1,5 +1,5 @@
 {
-  "name": "11labs_outbound",
+  "name": "af-outbound",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -16,6 +16,7 @@
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "fetch": "^1.1.0",
+    "node-fetch": "^3.3.2",
     "twilio": "^5.4.2",
     "ws": "^8.18.0"
   }
