@@ -1031,7 +1031,7 @@ fastify.register(async (fastifyInstance) => {
 
 // WebSocket outbound route for handling media streams from Twilio
 fastify.register(async (fastifyInstance) => {
-  const response = await fetch("/get-info", {
+  const response = await fetch(`https://${request.headers.host}/get-info`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
