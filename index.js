@@ -383,18 +383,15 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 
 // Route to handle outbound calls from Twilio
 fastify.all("/outbound-call-twiml", async (request, reply) => {
-  const prompt = request.query.prompt || "";
+  // const prompt = request.query.prompt || "";
   const first_message = request.query.first_message || "";
-  const agentId = request.query.agentId || "";
 
   // Build TwiML with all parameters
   let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
         <Connect>
         <Stream url="wss://${request.headers.host}/outbound-media-stream">
-            <Parameter name="prompt" value="${prompt}" />
-            <Parameter name="first_message" value="${first_message}" /> 
-            <Parameter name="agentId" value="${agentId}" />
+            <Parameter name="first_message" value="${first_message}" />
         </Stream>
         </Connect>
     </Response>`;
@@ -404,7 +401,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { to, phoneNumber, agentId } = request.body;
+  const { to, phoneNumber, agentId, first_message } = request.body;
 
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -436,13 +433,14 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 
   try {
     console.log(
-      `[${requestId}] Initiating call from ${phoneNumber} to ${to} using agent ${selectedAgentId}`
+      `[${requestId}] Initiating call from ${phoneNumber} to ${to} using agent ${agentId}`
     );
 
     // Build the webhook URL with all parameters
     const params = new URLSearchParams();
     if (phoneNumber) params.append("phoneNumber", phoneNumber);
     if (agentId) params.append("agentId", agentId);
+    if (first_message) params.append("first_message", first_message);
 
     // send to twiml
     const webhookUrl = `https://${
@@ -469,7 +467,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       requestId,
       to,
       fromNumber,
-      agentId: selectedAgentId,
+      agentId: agentId,
       startTime: new Date(),
       status: "initiated",
     };
@@ -1033,6 +1031,17 @@ fastify.register(async (fastifyInstance) => {
 
 // WebSocket outbound route for handling media streams from Twilio
 fastify.register(async (fastifyInstance) => {
+  const response = await fetch("/get-info", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  const rsp = await response.json();
+
+  console.info(`get info: ${rsp}`);
+
   fastifyInstance.get(
     "/outbound-media-stream",
     { websocket: true },
@@ -1042,7 +1051,8 @@ fastify.register(async (fastifyInstance) => {
       let streamSid = null;
       let callSid = null;
       let elevenLabsWs = null;
-      let customParameters = null; // Add this to store parameters
+      let customParameters = { rsp }; // Add this to store parameters
+
       // Handle WebSocket errors
       ws.on("error", console.error);
       // Set up ElevenLabs connection
@@ -1064,34 +1074,10 @@ fastify.register(async (fastifyInstance) => {
           elevenLabsWs.on("open", () => {
             console.log("[ElevenLabs] Connected to Conversational AI");
 
-            // Create dynamic variables object from customParameters
-            const dynamicVars = {
-              // Default values or empty strings
-              fullName: customParameters?.fullName || "",
-              email: customParameters?.email || "",
-              company: customParameters?.company || "",
-              jobTitle: customParameters?.jobTitle || "",
-              city: customParameters?.city || "",
-            };
-
-            console.log("[ElevenLabs] Using dynamic variables:", dynamicVars);
-
             // Send initial configuration with prompt, first message and dynamic variables
             const initialConfig = {
               type: "conversation_initiation_client_data",
-              dynamic_variables: dynamicVars,
-              conversation_config_override: {
-                agent: {
-                  prompt: {
-                    prompt:
-                      customParameters?.prompt ||
-                      "You are a professional sales representative. Be helpful, courteous, and conversational.",
-                  },
-                  first_message:
-                    customParameters?.first_message ||
-                    "Hello! Thanks for taking my call today. How are you doing?",
-                },
-              },
+              customParameters,
             };
 
             console.log(
