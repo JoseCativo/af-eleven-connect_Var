@@ -1130,22 +1130,11 @@ fastify.post("/call-status", async (request, reply) => {
 });
 
 // Start the Fastify server
-const startServer = async () => {
-  try {
-    // For Vercel, we need to listen on 0.0.0.0 and use the PORT environment variable
-    await fastify.listen({
-      port: process.env.PORT || 8000,
-      host: "0.0.0.0",
-    });
-    console.log(
-      `[Server] Listening on port ${
-        fastify.server.address().port
-      } on all interfaces`
-    );
-  } catch (err) {
+// Start the Fastify server
+fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
+  if (err) {
     console.error("Error starting server:", err);
     process.exit(1);
   }
-};
-
-startServer();
+  console.log(`[Server] Listening on port ${PORT} on all interfaces`);
+});
