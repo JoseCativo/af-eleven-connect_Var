@@ -481,6 +481,8 @@ fastify.register(async (fastifyInstance) => {
     (ws, req) => {
       console.info("[Server] Twilio connected to outbound media stream");
       console.log("[Server] Query parameters:", req.query);
+      console.log("[Server] Query req body:", req.requestBody);
+      console.log("[Server] Query body:", req.body);
 
       // Variables to track the call
       let streamSid = null;
