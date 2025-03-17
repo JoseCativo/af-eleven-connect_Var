@@ -519,51 +519,6 @@ fastify.register(async (fastifyInstance) => {
         }
       };
 
-      // Fetch client information from get-info API
-      const fetchClientInfo = async (to, from, sid, agent) => {
-        try {
-          const host = req.headers.host;
-          console.log(
-            `[INFO] Fetching client information for caller: ${from}, called: ${to}`
-          );
-
-          // Extract API key from environment
-          const apiKey = configStore.GHL_API_KEY || process.env.GHL_API_KEY;
-
-          if (!apiKey) {
-            console.error(`[INFO] No Go High Level API key available`);
-            return null;
-          }
-
-          // We'll use the POST endpoint as it's more flexible
-          const response = await fetch(`https://${host}/get-ghl-info`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            console.log(
-              `[INFO] Retrieved Go High Level client information for: ${
-                data.dynamic_variables?.user_name || "unknown user"
-              }`
-            );
-            return data;
-          } else {
-            console.error(
-              `[INFO] Failed to retrieve client information: ${response.status}`
-            );
-            return null;
-          }
-        } catch (error) {
-          console.error(`[INFO] Error fetching client information:`, error);
-          return null;
-        }
-      };
-
       // Set up ElevenLabs connection - but we'll call this after receiving start event
       const setupElevenLabs = async () => {
         try {
@@ -572,14 +527,6 @@ fastify.register(async (fastifyInstance) => {
             customParameters?.agentId ||
             req.query.agentId ||
             configStore.ELEVENLABS_AGENT_IDS[0];
-
-          // First, try to get client information
-          clientInfo = await fetchClientInfo(
-            customParameters?.to,
-            customParameters?.phoneNumber,
-            callSid,
-            agentId
-          );
 
           if (!agentId) {
             throw new Error("No agent ID available");
@@ -600,47 +547,25 @@ fastify.register(async (fastifyInstance) => {
             console.log("[ElevenLabs] Connected to Conversational AI");
 
             try {
-              // Create dynamic variables object with data from get-info API if available
-              let dynamicVars = {
-                user_id: "twilio-" + (callSid || "unknown"), // Always include user_id
-                user_name: "Boss", // Default value
-              };
+              // Create the config with proper format TODO test
 
-              // If we have client info, merge it with our dynamic variables
-              if (clientInfo && clientInfo.dynamic_variables) {
-                // Extract the user_name from client info if available
-                if (clientInfo.dynamic_variables.user_name) {
-                  dynamicVars.user_name =
-                    clientInfo.dynamic_variables.user_name;
-                }
-
-                // Merge all other dynamic variables from client info
-                dynamicVars = {
-                  ...clientInfo.dynamic_variables,
-                  ...dynamicVars, // Keep our user_id
-                  user_name:
-                    clientInfo.dynamic_variables.user_name ||
-                    dynamicVars.user_name, // Ensure user_name is set
-                };
-              }
-
-              // Create the config with proper format
               const initialConfig = {
                 type: "conversation_initiation_client_data",
-                dynamic_variables: dynamicVars,
-                conversation_config_override:
-                  clientInfo?.conversation_config_override || {
-                    agent: {
-                      first_message:
-                        customParameters?.first_message ||
-                        `Hello ${dynamicVars.user_name}! How can I help you today?`,
+                conversation_config_override: {
+                  agent: {
+                    prompt: {
+                      prompt:
+                        customParameters?.prompt ||
+                        "You are affinity design sales agent",
                     },
+                    first_message: customParameters?.first_message || "hello?!",
                   },
+                },
               };
 
               console.log(
                 "[ElevenLabs] Sending initial config with dynamic variables:",
-                JSON.stringify(initialConfig.dynamic_variables)
+                JSON.stringify(initialConfig)
               );
 
               // Send the configuration to ElevenLabs
@@ -845,12 +770,16 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { to, phoneNumber, agentId, first_message } = request.body;
+  const { business_name, city, job_title } = request.body;
+  const { to, from, email } = request.query;
+
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
   console.log(`[${requestId}] Outbound call request received`);
 
-  // I would like to call the local
+  // Get TODO build prompt & first message
+  const prompt = null;
+  const first_message = null;
 
   // Input validation
   if (!to) {
@@ -878,24 +807,17 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       `[${requestId}] Initiating call from ${phoneNumber} to ${to} using agent ${agentId}`
     );
 
-    // Build the webhook URL with all parameters
-    const params = new URLSearchParams();
-    if (phoneNumber) params.append("phoneNumber", phoneNumber);
-    if (agentId) params.append("agentId", agentId);
-    if (first_message) params.append("first_message", first_message);
-
-    // send to twiml
-    // const webhookUrl = `https://${
-    //   request.headers.host
-    // }/outbound-call-twiml?first_message=${encodeURIComponent(first_message)}`;
-
-    const webhookUrl = `https://${request.headers.host}/outbound-call-twiml`;
+    const webhookUrl = `https://${
+      request.headers.host
+    }/outbound-call-twiml?prompt=${encodeURIComponent(
+      prompt
+    )}&first_message=${encodeURIComponent(first_message)}`;
 
     // Create the call
     const call = await twilioClient.calls.create({
       url: webhookUrl,
       to: to,
-      from: phoneNumber,
+      from: from,
       statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
@@ -910,7 +832,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       callSid: call.sid,
       requestId,
       to,
-      phoneNumber,
+      from,
       agentId: agentId,
       startTime: new Date(),
       status: "initiated",
@@ -985,12 +907,14 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 
 // Route to handle outbound calls from Twilio
 fastify.all("/outbound-call-twiml", async (request, reply) => {
+  const prompt = request.query.prompt || "";
   const first_message = request.query.first_message || "";
 
   const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Connect>
           <Stream url="wss://${request.headers.host}/outbound-media-stream">
+            <Parameter name="prompt" value="${prompt}" />
             <Parameter name="first_message" value="${first_message}" />
           </Stream>
         </Connect>
