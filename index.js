@@ -23,6 +23,7 @@ const configStore = {
     ? [process.env.ELEVENLABS_AGENT_ID]
     : [],
 
+  GHL_API_KEY: process.env.GHL_API_KEY,
   // Active connections
   activeConnections: new Map(), // Map of streamSid to connection info
 };
@@ -227,6 +228,33 @@ fastify.get("/config", async (request, reply) => {
     elevenLabsAgentIds: configStore.ELEVENLABS_AGENT_IDS,
     activeConnections: Array.from(configStore.activeConnections.keys()).length,
   });
+});
+// Add a new API endpoint to configure the Go High Level API key
+fastify.post("/config/ghl-api-key", async (request, reply) => {
+  const { apiKey } = request.body;
+
+  if (!apiKey) {
+    return reply.status(400).send({
+      error: "API key is required",
+    });
+  }
+
+  try {
+    // You might want to validate the API key by making a test request to GHL
+    // For now, we'll just store it
+    configStore.GHL_API_KEY = apiKey;
+
+    reply.send({
+      success: true,
+      message: "Go High Level API key updated successfully",
+    });
+  } catch (error) {
+    console.error("Error updating Go High Level API key:", error);
+    reply.status(500).send({
+      error: "Failed to update Go High Level API key",
+      details: error.message,
+    });
+  }
 });
 // API to configure elevin labs agents credentials
 fastify.post("/config/elevenlabs-agents", async (request, reply) => {
@@ -452,6 +480,7 @@ fastify.register(async (fastifyInstance) => {
     { websocket: true },
     (ws, req) => {
       console.info("[Server] Twilio connected to outbound media stream");
+      console.log("[Server] Query parameters:", req.query);
 
       // Variables to track the call
       let streamSid = null;
@@ -492,26 +521,33 @@ fastify.register(async (fastifyInstance) => {
       const fetchClientInfo = async (to, from, sid, agent) => {
         try {
           const host = req.headers.host;
-          console.log(`[INFO] Fetching client information for ${to}`);
+          console.log(
+            `[INFO] Fetching client information for caller: ${from}, called: ${to}`
+          );
 
-          const response = await fetch(`https://${host}/get-info`, {
+          // Extract API key from environment
+          const apiKey = configStore.GHL_API_KEY || process.env.GHL_API_KEY;
+
+          if (!apiKey) {
+            console.error(`[INFO] No Go High Level API key available`);
+            return null;
+          }
+
+          // We'll use the POST endpoint as it's more flexible
+          const response = await fetch(`https://${host}/get-ghl-info`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
             },
-            body: JSON.stringify({
-              caller_id: from || "",
-              called_number: to || "",
-              call_sid: sid || "",
-              agent_id: agent || "",
-            }),
           });
 
           if (response.ok) {
             const data = await response.json();
             console.log(
-              `[INFO] Retrieved client information:`,
-              JSON.stringify(data).substring(0, 200)
+              `[INFO] Retrieved Go High Level client information for: ${
+                data.dynamic_variables?.user_name || "unknown user"
+              }`
             );
             return data;
           } else {
@@ -986,7 +1022,7 @@ fastify.post("/get-info", async (request, reply) => {
     dynamic_variables: dynamic_variables,
     conversation_config_override: {
       agent: {
-        first_message: `Hi ${dynamic_variables.customer_name}, how can I help you today?`,
+        first_message: `Hi ${dynamic_variables.customer_name}?`,
         //   prompt: {
         //     prompt:
         //       "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
@@ -999,6 +1035,201 @@ fastify.post("/get-info", async (request, reply) => {
   console.log(`[${requestId}] Returning personalization data`);
 
   reply.send(response);
+});
+
+fastify.post("/get-ghl-info", async (request, reply) => {
+  // Generate a request ID for tracking
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
+  // Extract parameters from request body
+  const { email, phone } = request.body;
+
+  // Extract API key from authorization header
+  const apiKey = request.headers.authorization?.replace("Bearer ", "");
+
+  // Validate required parameters - we need either email or phone
+  if (!email && !phone) {
+    console.log(`[${requestId}] Error: Missing search parameters`);
+    return reply.status(400).send({
+      error: "Either email, phone, or caller_id parameter is required",
+      requestId,
+    });
+  }
+
+  if (!apiKey) {
+    console.log(`[${requestId}] Error: Missing authorization header`);
+    return reply.status(401).send({
+      error: "Authorization header with Bearer token is required",
+      requestId,
+    });
+  }
+
+  // Determine which parameter to use for searching
+  let searchParam = {};
+  let searchValue = "";
+
+  if (email) {
+    searchParam = { email };
+    searchValue = email;
+  } else if (phone) {
+    searchParam = { phone };
+    searchValue = phone;
+  }
+
+  try {
+    console.log(
+      `[${requestId}] Querying Go High Level for contact info: ${searchValue}`
+    );
+
+    // API endpoint for searching contacts
+    const endpoint = "https://services.leadconnectorhq.com/contacts/search";
+
+    // Make the HTTP request to search for the contact
+    const searchResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Version: "2021-07-28",
+      },
+      body: JSON.stringify({
+        ...searchParam,
+        limit: 1, // We only need the first matching contact
+      }),
+    });
+
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      throw new Error(
+        `HTTP error! Status: ${searchResponse.status}, Details: ${errorText}`
+      );
+    }
+
+    const searchResult = await searchResponse.json();
+
+    // Check if we found any matching contacts
+    if (!searchResult.contacts || searchResult.contacts.length === 0) {
+      console.log(
+        `[${requestId}] No contact found with search param: ${searchValue}`
+      );
+
+      // Return default data since we couldn't find a match
+      const defaultResponse = {
+        dynamic_variables: {
+          user_name: "Customer",
+          email: email || "",
+          phone: phone || caller_id || "",
+          company: "",
+          first_name: "",
+          last_name: "",
+        },
+        conversation_config_override: {
+          agent: {
+            first_message:
+              "Hello! Thanks for taking my call today. How are you doing?",
+          },
+        },
+      };
+
+      return reply.send(defaultResponse);
+    }
+
+    // Get the first matching contact
+    const contact = searchResult.contacts[0];
+
+    console.log(
+      `[${requestId}] Found contact: ${contact.firstName} ${contact.lastName}`
+    );
+
+    // Map Go High Level contact fields to our dynamic variables
+    const dynamic_variables = {
+      // Name fields - we need to ensure user_name is properly set
+      user_name: `${contact.firstName || ""} ${contact.lastName || ""}`.trim(),
+      first_name: contact.firstName || "",
+      last_name: contact.lastName || "",
+
+      // Contact information
+      email: contact.email || email || "",
+      phone: contact.phone || phone || "",
+
+      // Company information
+      company: contact.companyName || "",
+      website: contact.website || "",
+
+      // Address information
+      address: contact.address1 || "",
+      city: contact.city || "",
+      state: contact.state || "",
+      postal_code: contact.postalCode || "",
+      country: contact.country || "",
+
+      // Additional fields
+      tags: contact.tags || [],
+      customFields: contact.customFields || {},
+    };
+
+    // Create a personalized first message based on the contact's name
+    const firstName = contact.firstName || "there";
+    const firstMessage = `Hi ${firstName}, this is Alex from Affinity Design. How are you doing today?`;
+
+    // Create a personalized prompt with context about the customer
+    const promptBase = `You are speaking with ${dynamic_variables.user_name}`;
+    const companyContext = dynamic_variables.company
+      ? ` who works at ${dynamic_variables.company}`
+      : "";
+    const locationContext = dynamic_variables.city
+      ? ` based in ${dynamic_variables.city}${
+          dynamic_variables.state ? ", " + dynamic_variables.state : ""
+        }`
+      : "";
+    const promptSuffix = `. Be friendly, professional, and conversational. Address the customer by their first name (${firstName}) when appropriate.`;
+
+    const prompt = promptBase + companyContext + locationContext + promptSuffix;
+
+    // const response = {
+    //   dynamic_variables: dynamic_variables,
+    //   conversation_config_override: {
+    //     agent: {
+    //       first_message: firstMessage,
+    //     }
+    //   }
+    // };
+
+    // Prepare the response object
+    const response = {
+      dynamic_variables: dynamic_variables,
+    };
+
+    // Log the response for debugging (limited to avoid exposing sensitive information)
+    console.log(
+      `[${requestId}] Returning Go High Level contact data for ${dynamic_variables.user_name}`
+    );
+
+    reply.send(response);
+  } catch (error) {
+    console.error(
+      `[${requestId}] Error fetching contact from Go High Level:`,
+      error
+    );
+
+    // Return a default response even if there was an error
+    const defaultResponse = {
+      dynamic_variables: {
+        user_name: "Customer",
+        email: email || "",
+        phone: phone || "",
+        company: "",
+        first_name: "",
+        last_name: "",
+      },
+    };
+
+    // Log the error but still return a valid response to prevent call failures
+    console.log(`[${requestId}] Returning default values due to error`);
+    reply.send(defaultResponse);
+  }
 });
 
 // Route to get a representative's availability
@@ -1267,7 +1498,6 @@ fastify.post("/call-status", async (request, reply) => {
   reply.send({ success: true });
 });
 
-// Start the Fastify server
 // Start the Fastify server
 fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
