@@ -508,7 +508,7 @@ fastify.register(async (fastifyInstance) => {
             try {
               // Create dynamic variables object - required by ElevenLabs
               const dynamicVars = {
-                user_name: "Customer", // Required field
+                user_name: "Boss", // Required field
                 user_id: "twilio-" + (callSid || "unknown"),
               };
 
@@ -518,9 +518,7 @@ fastify.register(async (fastifyInstance) => {
                 dynamic_variables: dynamicVars,
                 conversation_config_override: {
                   agent: {
-                    first_message:
-                      customParameters?.first_message ||
-                      "Hello! Thanks for taking my call. How are you doing today?",
+                    first_message: customParameters?.first_message || "Hello??",
                   },
                 },
               };
@@ -556,7 +554,6 @@ fastify.register(async (fastifyInstance) => {
                 case "audio":
                   if (message.audio_event?.audio_base_64) {
                     if (streamSid) {
-                      console.log("[ElevenLabs] Sending audio to Twilio");
                       ws.send(
                         JSON.stringify({
                           event: "media",
@@ -576,7 +573,6 @@ fastify.register(async (fastifyInstance) => {
 
                 case "ping":
                   if (message.ping_event?.event_id) {
-                    console.log("[ElevenLabs] Received ping, sending pong");
                     elevenLabsWs.send(
                       JSON.stringify({
                         type: "pong",
@@ -919,7 +915,7 @@ fastify.post("/get-info", async (request, reply) => {
   // For example, query a CRM to get customer information
 
   const dynamic_variables = {
-    fullName: "Paul Giovanatto",
+    user_name: "Paul Giovanatto",
     email: "paulgiovanatto@gmail.com",
     company: "Affinity Design",
     jobTitle: "CEO",
