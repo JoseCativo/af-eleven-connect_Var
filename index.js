@@ -508,7 +508,7 @@ fastify.register(async (fastifyInstance) => {
             try {
               // Create dynamic variables object - required by ElevenLabs
               const dynamicVars = {
-                user_name: "Boss", // Required field
+                customer_name: "Boss", // Required field
                 user_id: "twilio-" + (callSid || "unknown"),
               };
 
@@ -915,7 +915,7 @@ fastify.post("/get-info", async (request, reply) => {
   // For example, query a CRM to get customer information
 
   const dynamic_variables = {
-    user_name: "Paul Giovanatto",
+    customer_name: "Paul Giovanatto",
     email: "paulgiovanatto@gmail.com",
     company: "Affinity Design",
     jobTitle: "CEO",
@@ -926,7 +926,7 @@ fastify.post("/get-info", async (request, reply) => {
     dynamic_variables: dynamic_variables,
     conversation_config_override: {
       agent: {
-        first_message: `Hi ${dynamic_variables.fullName}, how can I help you today?`,
+        first_message: `Hi ${dynamic_variables.customer_name}, how can I help you today?`,
         //   prompt: {
         //     prompt:
         //       "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
