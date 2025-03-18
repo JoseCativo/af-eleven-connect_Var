@@ -770,16 +770,18 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { business_name, city, job_title } = request.body;
+  const { full_name, business_name, city, job_title } = request.body;
   const { to, from, email } = request.query;
 
+  const agentId = configStore.ELEVENLABS_AGENT_IDS[0]; // TODO implement agent id query param latter not now
+  const phoneRegex = /^\+[1-9]\d{1,14}$/;
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
   console.log(`[${requestId}] Outbound call request received`);
 
-  // Get TODO build prompt & first message
+  // HERE we need to build a helper function for prompt and first_message to 
   const prompt = null;
-  const first_message = null;
+  const first_message = `${full_name}?`;
 
   // Input validation
   if (!to) {
@@ -789,7 +791,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       requestId,
     });
   }
-  const phoneRegex = /^\+[1-9]\d{1,14}$/;
+ 
   if (!phoneRegex.test(to)) {
     console.log(
       `[${requestId}] Error: Invalid destination phone format: ${to}`
@@ -833,7 +835,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       requestId,
       to,
       from,
-      agentId: agentId,
+      agentId,
       startTime: new Date(),
       status: "initiated",
     };
