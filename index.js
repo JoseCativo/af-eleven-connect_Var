@@ -6,7 +6,7 @@ import fastifyFormBody from "@fastify/formbody";
 import fastifyWs from "@fastify/websocket";
 import Twilio from "twilio";
 import fetch from "node-fetch";
-import getCustomizedPrompt from './utils/scriptHelper.js';
+import getCustomizedPrompt from 'utils/scriptHelper.js';
 
 // Load environment variables from .env file for default values
 dotenv.config();
