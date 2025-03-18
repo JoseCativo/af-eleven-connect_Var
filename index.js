@@ -770,10 +770,11 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { full_name, business_name, city, job_title } = request.body;
-  const { to, from, email } = request.query;
+  const { full_name, business_name, city, job_title, email, phone } = request.body;
+  const { to, from } = request.query;
 
-  const agentId = configStore.ELEVENLABS_AGENT_IDS[0]; // TODO implement agent id query param latter not now
+
+  const agentId = configStore.ELEVENLABS_AGENT_IDS[0]; // TODO implement agent id query param for later
   const phoneRegex = /^\+[1-9]\d{1,14}$/;
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
