@@ -1,15 +1,10 @@
+// scriptHelper.js - Put this in the same directory as index.js
 import fs from 'fs/promises';
 import path from 'path';
 
 /**
  * Helper function to generate a customized prompt by reading from script.md
  * @param {Object} params - User parameters from request body
- * @param {string} params.full_name - User's full name
- * @param {string} params.business_name - Business name
- * @param {string} params.city - City location
- * @param {string} params.job_title - Job title
- * @param {string} params.email - Email address
- * @param {string} params.phone - Phone number
  * @returns {Promise<string>} - Customized prompt content
  */
 async function getCustomizedPrompt(params = {}) {
@@ -23,9 +18,37 @@ async function getCustomizedPrompt(params = {}) {
   } = params;
 
   try {
-    // Read the script.md file
-    const scriptPath = path.resolve(process.cwd(), 'prompts/script.md');
-    const scriptContent = await fs.readFile(scriptPath, 'utf8');
+    // For containerized environment, look for script.md in different possible locations
+    const possiblePaths = [
+      path.resolve(process.cwd(), 'prompts/script.md'),
+      path.resolve(process.cwd(), 'prompt/script.md'),
+      path.resolve(process.cwd(), 'script.md'),
+      path.resolve('/app/prompts/script.md'),
+      path.resolve('/app/prompt/script.md')
+    ];
+    
+    let scriptContent = null;
+    let usedPath = null;
+    
+    // Try each path until we find one that works
+    for (const scriptPath of possiblePaths) {
+      try {
+        console.log(`Attempting to read script from: ${scriptPath}`);
+        scriptContent = await fs.readFile(scriptPath, 'utf8');
+        usedPath = scriptPath;
+        console.log(`Successfully read script from: ${scriptPath}`);
+        break;
+      } catch (readError) {
+        console.log(`Could not read from: ${scriptPath}`);
+        // Continue to the next path
+      }
+    }
+    
+    if (!scriptContent) {
+      throw new Error(`Could not find script.md in any of the expected locations: ${possiblePaths.join(', ')}`);
+    }
+    
+    console.log(`Using script from: ${usedPath}`);
     
     // Create a prompt by replacing placeholders in the script
     let prompt = scriptContent;
