@@ -6,6 +6,7 @@ import fastifyFormBody from "@fastify/formbody";
 import fastifyWs from "@fastify/websocket";
 import Twilio from "twilio";
 import fetch from "node-fetch";
+import getCustomizedPrompt from './utils/scriptHelper.js';
 
 // Load environment variables from .env file for default values
 dotenv.config();
@@ -773,7 +774,6 @@ fastify.post("/make-outbound-call", async (request, reply) => {
   const { full_name, business_name, city, job_title, email, phone } = request.body;
   const { to, from } = request.query;
 
-
   const agentId = configStore.ELEVENLABS_AGENT_IDS[0]; // TODO implement agent id query param for later
   const phoneRegex = /^\+[1-9]\d{1,14}$/;
   const requestId =
@@ -781,8 +781,19 @@ fastify.post("/make-outbound-call", async (request, reply) => {
   console.log(`[${requestId}] Outbound call request received`);
 
   // HERE we need to build a helper function for prompt and first_message to 
-  const prompt = null;
-  const first_message = `${full_name}?`;
+  const prompt = await getCustomizedPrompt({
+    full_name,
+    business_name,
+    city,
+    job_title,
+    email,
+    phone
+  });
+
+  const firstName = full_name ? full_name.split(' ')[0] : '';
+  const first_message = `${firstName}?`;
+
+  console.log(`[${requestId}] Generated customized prompt for call: ${prompt}`);
 
   // Input validation
   if (!to) {
@@ -803,11 +814,11 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     });
   }
 
-  // Make the call
+  // Make the call test
 
   try {
     console.log(
-      `[${requestId}] Initiating call from ${phoneNumber} to ${to} using agent ${agentId}`
+      `[${requestId}] Initiating call from ${from} to ${to} using agent ${agentId}`
     );
 
     const webhookUrl = `https://${
@@ -835,10 +846,18 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       callSid: call.sid,
       requestId,
       to,
-      from,
+      from: from,
       agentId,
       startTime: new Date(),
       status: "initiated",
+      metadata: {
+        full_name,
+        business_name,
+        city,
+        job_title,
+        email,
+        phone
+      }
     };
 
     // Store call data (could be expanded to a proper database)
