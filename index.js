@@ -550,19 +550,27 @@ fastify.register(async (fastifyInstance) => {
             try {
               // Create the config with proper format TODO test
 
-              const initialConfig = {
-                type: "conversation_initiation_client_data",
-                conversation_config_override: {
-                  agent: {
-                    prompt: {
-                      prompt:
-                        customParameters?.prompt ||
-                        "You are affinity design sales agent",
-                    },
-                    first_message: customParameters?.first_message || "hello?!",
-                  },
-                },
-              };
+               // Extract dynamic variables from custom parameters
+               const dynamicVariables = {};
+              
+               // Add each parameter as a dynamic variable if it exists
+               if (customParameters?.full_name) dynamicVariables.full_name = customParameters.full_name;
+               if (customParameters?.business_name) dynamicVariables.business_name = customParameters.business_name;
+               if (customParameters?.city) dynamicVariables.city = customParameters.city;
+               if (customParameters?.job_title) dynamicVariables.job_title = customParameters.job_title;
+               if (customParameters?.email) dynamicVariables.email = customParameters.email;
+               if (customParameters?.phone) dynamicVariables.phone = customParameters.phone;
+ 
+               // Create the initialization config with dynamic variables
+               const initialConfig = {
+                 type: "conversation_initiation_client_data",
+                 dynamic_variables: dynamicVariables,
+                 conversation_config_override: {
+                   agent: {
+                     first_message: customParameters?.first_message || "Hello, how can I help you today?",
+                   },
+                 },
+               };
 
               console.log(
                 "[ElevenLabs] Sending initial config with dynamic variables:",
@@ -773,27 +781,11 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 fastify.post("/make-outbound-call", async (request, reply) => {
   const { full_name, business_name, city, job_title, email, phone, from } = request.body;
 
-
-  const agentId = configStore.ELEVENLABS_AGENT_IDS[0]; // TODO implement agent id query param for later
+  const agentId = configStore.ELEVENLABS_AGENT_IDS[0];
   const phoneRegex = /^\+[1-9]\d{1,14}$/;
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  
   console.log(`[${requestId}] Outbound call request received`);
-
-  // HERE we need to build a helper function for prompt and first_message to 
-  const prompt = await getCustomizedPrompt({
-    full_name,
-    business_name,
-    city,
-    job_title,
-    email,
-    phone
-  });
-
-  const firstName = full_name ? full_name.split(' ')[0] : '';
-  const first_message = `${firstName}?`;
-
-  // console.log(`[${requestId}] Generated customized prompt for call: ${prompt}`);
 
   // Input validation
   if (!phone) {
@@ -805,48 +797,70 @@ fastify.post("/make-outbound-call", async (request, reply) => {
   }
  
   if (!phoneRegex.test(phone)) {
-    console.log(
-      `[${requestId}] Error: Invalid destination phone format: ${phone}`
-    );
+    console.log(`[${requestId}] Error: Invalid destination phone format: ${phone}`);
     return reply.status(400).send({
       error: "Phone number must be in E.164 format (e.g., +12125551234)",
       requestId,
     });
   }
 
-  // Make the call test
-
   try {
-    console.log(
-      `[${requestId}] Initiating call from ${from} to ${phone} using agent ${agentId}`
-    );
+    // Select phone number to use (from query param or first configured number)
+    const phoneNumber = from || configStore.TWILIO_PHONE_NUMBERS[0];
+    
+    if (!phoneNumber) {
+      throw new Error("No Twilio phone number available");
+    }
 
-    const webhookUrl = `https://${
-      request.headers.host
-    }/outbound-call-twiml?prompt=${encodeURIComponent(
-      prompt
-    )}&first_message=${encodeURIComponent(first_message)}`;
+    // Create first message (kept short for URL)
+    const firstName = full_name ? full_name.split(' ')[0] : '';
+    const first_message = `${firstName ? firstName : 'Hello'}?`;
+
+    // Build the webhook URL with all dynamic variables
+    let webhookUrl = `https://${request.headers.host}/outbound-call-twiml?`;
+    
+    // Add parameters to the URL
+    const params = {
+      first_message,
+      full_name,
+      business_name,
+      city,
+      job_title,
+      email,
+      phone,
+      requestId
+    };
+    
+    // Convert parameters to URL query string
+    const queryParams = [];
+    for (const [key, value] of Object.entries(params)) {
+      if (value) {
+        queryParams.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+      }
+    }
+    
+    webhookUrl += queryParams.join('&');
+    
+    console.log(`[${requestId}] Using webhook URL with dynamic variables`);
 
     // Create the call
     const call = await twilioClient.calls.create({
       url: webhookUrl,
       to: phone,
-      from: from,
+      from: phoneNumber,
       statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
     });
 
-    console.log(
-      `[${requestId}] Outbound call initiated successfully: ${call.sid}`
-    );
+    console.log(`[${requestId}] Outbound call initiated successfully: ${call.sid}`);
 
     // Track the call in our application
     const callData = {
       callSid: call.sid,
       requestId,
-      to: phone,
-      from: from,
+      phone,
+      from: phoneNumber,
       agentId,
       startTime: new Date(),
       status: "initiated",
@@ -860,7 +874,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       }
     };
 
-    // Store call data (could be expanded to a proper database)
+    // Store call data
     if (!configStore.callHistory) {
       configStore.callHistory = new Map();
     }
@@ -869,7 +883,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     reply.send({
       success: true,
       message: "Call initiated successfully",
-      callSid: call.sid,
+      callSid: call.sid
     });
   } catch (error) {
     // Detailed error handling based on the type of error
@@ -929,20 +943,43 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 
 // Route to handle outbound calls from Twilio
 fastify.all("/outbound-call-twiml", async (request, reply) => {
-  const prompt = request.query.prompt || "";
-  const first_message = request.query.first_message || "";
+  // Extract all query parameters for dynamic variables
+  const {
+    first_message,
+    full_name,
+    business_name,
+    city,
+    job_title,
+    email,
+    phone,
+    requestId
+  } = request.query;
 
-  const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Connect>
-          <Stream url="wss://${request.headers.host}/outbound-media-stream">
-            <Parameter name="prompt" value="${prompt}" />
-            <Parameter name="first_message" value="${first_message}" />
-          </Stream>
-        </Connect>
-      </Response>`;
+  console.log(`[${requestId || 'unknown'}] Generating TwiML with parameters:`, request.query);
 
-  reply.type("text/xml").send(twimlResponse);
+  // Create the TwiML response that passes all variables to the WebSocket stream
+  let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Connect>
+        <Stream url="wss://${request.headers.host}/outbound-media-stream">`;
+  
+  // Add each parameter to the TwiML if it exists
+  if (first_message) twimlResponse += `\n          <Parameter name="first_message" value="${first_message}" />`;
+  if (full_name) twimlResponse += `\n          <Parameter name="full_name" value="${full_name}" />`;
+  if (business_name) twimlResponse += `\n          <Parameter name="business_name" value="${business_name}" />`;
+  if (city) twimlResponse += `\n          <Parameter name="city" value="${city}" />`;
+  if (job_title) twimlResponse += `\n          <Parameter name="job_title" value="${job_title}" />`;
+  if (email) twimlResponse += `\n          <Parameter name="email" value="${email}" />`;
+  if (phone) twimlResponse += `\n          <Parameter name="phone" value="${phone}" />`;
+  if (requestId) twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
+  
+  // Close the TwiML tags
+  twimlResponse += `
+        </Stream>
+      </Connect>
+    </Response>`;
+
+  reply.type('text/xml').send(twimlResponse);
 });
 
 // New endpoint to serve personalized data for inbound calls TODO test

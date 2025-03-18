@@ -1,5 +1,3 @@
-Hey its Laura with affinity, You just filled out our ad online for a free AI I Consultation call correct?
-
 # AI Inbound Sales Rep Prompt for Affinity Design
 
 ## ROLE
