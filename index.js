@@ -771,8 +771,8 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { full_name, business_name, city, job_title, email, phone } = request.body;
-  const { to, from } = request.query;
+  const { full_name, business_name, city, job_title, email, phone, from } = request.body;
+
 
   const agentId = configStore.ELEVENLABS_AGENT_IDS[0]; // TODO implement agent id query param for later
   const phoneRegex = /^\+[1-9]\d{1,14}$/;
@@ -793,10 +793,10 @@ fastify.post("/make-outbound-call", async (request, reply) => {
   const firstName = full_name ? full_name.split(' ')[0] : '';
   const first_message = `${firstName}?`;
 
-  console.log(`[${requestId}] Generated customized prompt for call: ${prompt}`);
+  // console.log(`[${requestId}] Generated customized prompt for call: ${prompt}`);
 
   // Input validation
-  if (!to) {
+  if (!phone) {
     console.log(`[${requestId}] Error: Destination phone number missing`);
     return reply.status(400).send({
       error: "Destination phone number is required",
@@ -804,9 +804,9 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     });
   }
  
-  if (!phoneRegex.test(to)) {
+  if (!phoneRegex.test(phone)) {
     console.log(
-      `[${requestId}] Error: Invalid destination phone format: ${to}`
+      `[${requestId}] Error: Invalid destination phone format: ${phone}`
     );
     return reply.status(400).send({
       error: "Phone number must be in E.164 format (e.g., +12125551234)",
@@ -818,7 +818,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 
   try {
     console.log(
-      `[${requestId}] Initiating call from ${from} to ${to} using agent ${agentId}`
+      `[${requestId}] Initiating call from ${from} to ${phone} using agent ${agentId}`
     );
 
     const webhookUrl = `https://${
@@ -830,7 +830,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     // Create the call
     const call = await twilioClient.calls.create({
       url: webhookUrl,
-      to: to,
+      to: phone,
       from: from,
       statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
@@ -845,7 +845,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     const callData = {
       callSid: call.sid,
       requestId,
-      to,
+      to: phone,
       from: from,
       agentId,
       startTime: new Date(),
