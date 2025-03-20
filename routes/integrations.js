@@ -1,10 +1,10 @@
 import fetch from "node-fetch";
-import Client from "../client.js"; // Direct import of the Mongoose model
+import Client from "../client.js";
 
 async function integrationsRoutes(fastify, options) {
   // Endpoint to handle GHL OAuth callback
   fastify.get("/callback", async (request, reply) => {
-    const { code, error } = request.query;
+    const { code, error, state } = request.query;
 
     // Check for errors from GHL
     if (error) {
@@ -23,7 +23,7 @@ async function integrationsRoutes(fastify, options) {
     try {
       // Exchange the authorization code for tokens
       const tokenResponse = await fetch(
-        "https://api.gohighlevel.com/oauth/token",
+        "https://services.gohighlevel.com/oauth/token",
         {
           method: "POST",
           headers: {
@@ -31,10 +31,10 @@ async function integrationsRoutes(fastify, options) {
           },
           body: new URLSearchParams({
             grant_type: "authorization_code",
-            client_id: process.env.GHL_CLIENT_ID, // Your app’s Client ID from GHL Marketplace
-            client_secret: process.env.GHL_CLIENT_SECRET, // Your app’s Client Secret from GHL Marketplace
+            client_id: process.env.GHL_CLIENT_ID,
+            client_secret: process.env.GHL_CLIENT_SECRET,
             code: code,
-            redirect_uri: process.env.GHL_REDIRECT_URI, // e.g., https://api.v1.affinitydesign.ca/integrations/callback
+            redirect_uri: process.env.GHL_REDIRECT_URI,
           }),
         }
       );
@@ -53,32 +53,30 @@ async function integrationsRoutes(fastify, options) {
       const { access_token, refresh_token, expires_in } = tokenData;
 
       // Calculate token expiration time
-      const expiresAt = new Date(Date.now() + expires_in * 1000); // Convert seconds to milliseconds
+      const expiresAt = new Date(Date.now() + expires_in * 1000);
 
-      // Determine the clientId (GHL sub-account ID)
-      // For now, assume it’s passed as a query param (e.g., ?clientId=ghl-subaccount-id)
-      // You may need to adjust this based on how you associate GHL sub-accounts with your clients
-      const clientId = request.query.clientId;
+      // Use state parameter instead of clientId
+      const clientId = state || request.query.clientId;
       if (!clientId) {
-        fastify.log.error("No clientId provided in callback");
+        fastify.log.error("No client identifier provided in callback");
         return reply
           .status(400)
-          .send({ error: "clientId query parameter is required" });
+          .send({ error: "Client identifier (state parameter) is required" });
       }
 
-      // Update or create the client document in MongoDB
+      // Update the client document in MongoDB
       const updatedClient = await Client.findOneAndUpdate(
-        { clientId }, // Match by GHL sub-account ID
+        { clientId },
         {
-          clientSecret: access_token, // GHL access token
-          refreshToken: refresh_token, // GHL refresh token
-          tokenExpiresAt: expiresAt, // When the access token expires
-          // Only update these fields; don’t overwrite others like clientMeta if they exist
+          // Store tokens separately, not overwriting clientSecret
+          accessToken: access_token,
+          refreshToken: refresh_token,
+          tokenExpiresAt: expiresAt,
         },
         {
-          upsert: true, // Create a new document if it doesn’t exist
-          new: true, // Return the updated document
-          setDefaultsOnInsert: true, // Apply schema defaults if creating a new document
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
         }
       );
 
@@ -86,7 +84,7 @@ async function integrationsRoutes(fastify, options) {
       return reply.send({
         message: "GHL integration successful",
         clientId: clientId,
-        accessToken: access_token, // Optional: return for immediate use or debugging
+        accessToken: access_token,
       });
     } catch (err) {
       fastify.log.error(`Error in GHL callback: ${err.message}`);
@@ -94,6 +92,29 @@ async function integrationsRoutes(fastify, options) {
         .status(500)
         .send({ error: "Internal server error", details: err.message });
     }
+  });
+
+  // Add an endpoint to generate the authorization URL
+  fastify.get("/authorize/:clientId", async (request, reply) => {
+    const { clientId } = request.params;
+
+    if (!clientId) {
+      return reply.status(400).send({ error: "Client ID is required" });
+    }
+
+    const authUrl = new URL(
+      "https://marketplace.gohighlevel.com/oauth/chooselocation"
+    );
+    authUrl.searchParams.append("response_type", "code");
+    authUrl.searchParams.append("client_id", process.env.GHL_CLIENT_ID);
+    authUrl.searchParams.append("redirect_uri", process.env.GHL_REDIRECT_URI);
+    authUrl.searchParams.append(
+      "scope",
+      "contacts.readonly contacts.write calendars/resources.write calendars/resources.readonly calendars/groups.write calendars/groups.readonly calendars/events.write calendars/events.readonly calendars.write calendars.readonly companies.readonly"
+    );
+    authUrl.searchParams.append("state", clientId);
+
+    reply.send({ authorizationUrl: authUrl.toString() });
   });
 }
 
