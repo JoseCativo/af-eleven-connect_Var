@@ -77,8 +77,8 @@ const clientSchema = new mongoose.Schema(
       index: true, // Creates an index for faster lookups
     },
     calId: { type: String, required: true },
-    clientSecret: { type: String, required: true },
-    refreshToken: { type: String, required: true }, // GHL refresh token
+    clientSecret: { type: String },
+    refreshToken: { type: String }, // GHL refresh token
     tokenExpiresAt: { type: Date }, // When the access token expires
     agentId: { type: String, required: true },
     twilioPhoneNumber: { type: String, required: true },
