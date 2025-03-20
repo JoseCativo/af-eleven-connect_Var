@@ -1,5 +1,5 @@
 // clientService.js
-import Client from ".client.js";
+import Client from "./client.js";
 
 // Create a new client
 export async function createClient(clientData) {
