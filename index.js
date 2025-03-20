@@ -272,13 +272,6 @@ async function bookGHLAppointment(
 fastify.get("/", async (_, reply) => {
   reply.send({ message: "Server is running" });
 });
-// API to get all configuration
-// Config routes ///////////////////////////////////////
-
-// Root route for health check
-fastify.get("/", async (_, reply) => {
-  reply.send({ message: "Server is running" });
-});
 
 // API to get server status and configuration
 fastify.get("/status", async (request, reply) => {
