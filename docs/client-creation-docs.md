@@ -1,7 +1,3 @@
-Below is an updated version of your `Client Account Creation` documentation in Markdown format, incorporating a new section on **setting up a client access token**. I've included `curl` request examples and JSON responses consistent with your existing `af-eleven-connect` codebase, particularly the `auth.js` and `routes/auth.js` files, which handle client login and token generation.
-
----
-
 ````markdown
 # Client Account Creation
 
@@ -9,7 +5,7 @@ Below is an updated version of your `Client Account Creation` documentation in M
 
 This document details the process of creating a new client account in the Eleven Labs Outbound Caller system. Client accounts represent businesses or individuals who will use the system to make outbound calls using the ElevenLabs Conversational AI technology.
 
-Client accounts contain essential information such as contact details, assigned agent configurations, and Twilio phone number assignments. Each client receives unique authentication credentials to access the secure client API endpoints.
+Client accounts contain essential information such as contact details, assigned agent configurations, Twilio phone number assignments, and GoHighLevel (GHL) calendar IDs for integration. Each client receives unique authentication credentials to access the secure client API endpoints. Additionally, clients can be linked to GHL sub-accounts for integration with GHL features like calendar management.
 
 ## Prerequisites
 
@@ -19,6 +15,10 @@ Before creating a client account, ensure you have:
 2. A valid ElevenLabs agent ID to assign to the client
 3. A provisioned Twilio phone number to assign to the client
 4. Accurate contact information for the client
+5. For GHL integration:
+   - A GHL application registered in the Developer Marketplace with a `Client ID` and `Client Secret`
+   - The GHL sub-account ID (Location ID) for the client, if integrating with GHL
+   - The GHL calendar ID (`calId`) for the sub-account, if using calendar features
 
 ## Client Creation Process
 
@@ -39,19 +39,19 @@ curl -X POST https://api.v1.affinitydesign.ca/admin/clients \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
   -H "Content-Type: application/json" \
   -d '{
-    "clientId": "client_unique_id",
-    "clientSecret": "client_secure_secret_key",
+    "clientId": "5C3JSOVVFiVmBoh8mv3I",
+    "calId": "e0JBV5PARC9sbebxcYnY",
     "clientMeta": {
-      "fullName": "John Doe",
-      "email": "john@example.com",
-      "phone": "+12125551234",
-      "businessName": "Acme Corp",
-      "city": "New York",
+      "fullName": "Paul Giovanatto",
+      "email": "paul@affinitydesign.ca",
+      "phone": "+19058363456",
+      "businessName": "Affinity Design",
+      "city": "Canada",
       "jobTitle": "CEO",
-      "notes": "Prefers morning calls"
+      "notes": "The Boss ;)"
     },
-    "agentId": "agent_id_here",
-    "twilioPhoneNumber": "+18001234567",
+    "agentId": "qvu7240QhEUKLultBI7i",
+    "twilioPhoneNumber": "+18632704910",
     "status": "Active"
   }'
 ```
@@ -61,54 +61,95 @@ curl -X POST https://api.v1.affinitydesign.ca/admin/clients \
 
 #### Required Fields
 
-- **clientId**: Unique identifier for the client
-- **clientSecret**: Secret key for client authentication
-- **clientMeta.fullName**: The client's full name
-- **clientMeta.email**: The client's email address (must be unique)
-- **clientMeta.phone**: The client's phone number (in E.164 format, e.g., +12125551234)
-- **agentId**: The ID of the ElevenLabs conversational agent assigned to this client
-- **twilioPhoneNumber**: The Twilio phone number assigned to this client (in E.164 format)
+- **clientId**: Unique identifier for the client (if integrating with GHL, this should be the GHL sub-account ID, e.g., `5C3JSOVVFiVmBoh8mv3I`)
+- **clientMeta.fullName**: The client's full name (e.g., "Paul Giovanatto")
+- **clientMeta.email**: The client's email address (must be unique, e.g., "paul@affinitydesign.ca")
+- **clientMeta.phone**: The client's phone number (in E.164 format, e.g., "+19058363456")
+- **agentId**: The ID of the ElevenLabs conversational agent assigned to this client (e.g., "qvu7240QhEUKLultBI7i")
+- **twilioPhoneNumber**: The Twilio phone number assigned to this client (in E.164 format, e.g., "+18632704910")
 
 #### Optional Fields
 
-- **clientMeta.businessName**: The client's company or organization name
-- **clientMeta.city**: The client's city location
-- **clientMeta.jobTitle**: The client's professional title
-- **clientMeta.notes**: Additional information about the client
+- **calId**: The GHL calendar ID for the sub-account, used for calendar-related API calls (e.g., "e0JBV5PARC9sbebxcYnY")
+- **clientMeta.businessName**: The client's company or organization name (e.g., "Affinity Design")
+- **clientMeta.city**: The client's city or region (e.g., "Canada")
+- **clientMeta.jobTitle**: The client's professional title (e.g., "CEO")
+- **clientMeta.notes**: Additional information about the client (e.g., "The Boss ;)")
 - **status**: Client account status (defaults to "Active" if not specified; other values: "Inactive", "Suspended")
+
+#### Generated Fields
+
+- **clientSecret**: A secure key for client authentication (not related to GHL; this is for your app’s authentication). This is automatically generated by the system when the `POST /admin/clients` endpoint is called for the first time to create the client.
 
 ### Response Format
 
-Upon successful creation, the system returns a response with the new client's details:
+Upon successful creation, the system returns a response with the new client's details, including the generated `clientSecret`:
 
 ```json
 {
   "message": "Client created successfully",
   "client": {
-    "clientId": "client_12345abcde",
+    "clientId": "5C3JSOVVFiVmBoh8mv3I",
+    "calId": "e0JBV5PARC9sbebxcYnY",
     "status": "Active",
-    "agentId": "agent_id_here",
-    "twilioPhoneNumber": "+18001234567",
+    "agentId": "qvu7240QhEUKLultBI7i",
+    "twilioPhoneNumber": "+18632704910",
     "clientMeta": {
-      "fullName": "John Doe",
-      "email": "john@example.com",
-      "phone": "+12125551234",
-      "businessName": "Acme Corp",
-      "city": "New York",
+      "fullName": "Paul Giovanatto",
+      "email": "paul@affinitydesign.ca",
+      "phone": "+19058363456",
+      "businessName": "Affinity Design",
+      "city": "Canada",
       "jobTitle": "CEO",
-      "notes": "Prefers morning calls"
+      "notes": "The Boss ;)"
     },
+    "clientSecret": "generated_secure_secret_key",
     "createdAt": "2025-03-20T12:00:00.000Z",
     "updatedAt": "2025-03-20T12:00:00.000Z"
   }
 }
 ```
 
-> **Important Security Note**: The response will include both the `clientId` and `clientSecret` in this API response, as they were provided in the request. For security purposes, the `clientSecret` will not be retrievable in subsequent API calls unless explicitly reset.
+> **Important Security Note**: The response includes the `clientSecret`, which is generated automatically during client creation. For security purposes, the `clientSecret` will not be retrievable in subsequent API calls unless explicitly reset.
+
+## Linking a Client to a GoHighLevel Sub-Account
+
+To enable GHL integration (e.g., for calendar or contact management), you must link the client to a GHL sub-account by initiating the OAuth 2.0 authorization flow. This step is required to obtain GHL access and refresh tokens for the sub-account, which are stored in the client’s record.
+
+### Step 1: Initiate GHL Authorization
+
+Direct the sub-account owner (or an admin acting on their behalf) to the GHL authorization URL to approve your app’s access. The `clientId` in the URL should match the GHL sub-account ID (Location ID) of the client.
+
+**Authorization URL Format**:
+
+```
+https://app.gohighlevel.com/oauth/authorize?client_id=<GHL_CLIENT_ID>&redirect_uri=<GHL_REDIRECT_URI>&scope=<SCOPES>&response_type=code&clientId=<CLIENT_ID>
+```
+
+**Example**:
+
+For a client with GHL sub-account ID `5C3JSOVVFiVmBoh8mv3I`, using the app’s `GHL_CLIENT_ID` and redirect URI:
+
+```bash
+curl -X GET "https://app.gohighlevel.com/oauth/authorize?client_id=67db1075409a6863aca96c83-m8hk4mni&redirect_uri=https://api.v1.affinitydesign.ca/integrations/callback&scope=contacts.readonly%20contacts.write%20calendars/resources.write%20calendars/resources.readonly%20calendars/groups.write%20calendars/groups.readonly%20calendars/events.write%20calendars/events.readonly%20calendars.write%20calendars.readonly%20companies.readonly&response_type=code&clientId=5C3JSOVVFiVmBoh8mv3I"
+```
+
+#### Notes
+
+- **Browser Redirect**: This URL should be opened in a browser by the sub-account owner to log in and approve the app. It’s not meant to be called programmatically via `curl` in production; the `curl` command is for testing or documentation purposes.
+- **Redirect**: After approval, GHL redirects to the `redirect_uri` (e.g., `https://api.v1.affinitydesign.ca/integrations/callback?code=<AUTH_CODE>&clientId=5C3JSOVVFiVmBoh8mv3I`), where your app exchanges the code for tokens.
+
+### Step 2: Token Exchange (Handled Automatically)
+
+Your app’s `/integrations/callback` endpoint will handle the redirect, exchange the `code` for tokens, and store them in the client’s record. The stored tokens include:
+
+- `clientSecret`: GHL access token (overwrites the app-generated `clientSecret` for GHL purposes)
+- `refreshToken`: GHL refresh token
+- `tokenExpiresAt`: Token expiration time
 
 ## Setting Up a Client Access Token
 
-After creating a client account, the client needs a JWT access token to authenticate and use the secure `/secure/*` endpoints. This token is obtained by logging in with the `clientId` and `clientSecret`.
+After creating a client account and linking it to a GHL sub-account (if applicable), the client needs a JWT access token to authenticate and use the secure `/secure/*` endpoints in your app. This token is obtained by logging in with the `clientId` and `clientSecret` (the app-generated `clientSecret`, unless overwritten by GHL integration).
 
 ### API Endpoint Details
 
@@ -124,15 +165,15 @@ The client (or an admin on their behalf) can request a token using the following
 curl -X POST https://api.v1.affinitydesign.ca/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "clientId": "client_12345abcde",
-    "clientSecret": "client_secure_secret_key"
+    "clientId": "5C3JSOVVFiVmBoh8mv3I",
+    "clientSecret": "generated_secure_secret_key"
   }'
 ```
 
 ### Request Field Descriptions
 
-- **clientId**: The unique identifier assigned to the client during creation
-- **clientSecret**: The secret key assigned to the client during creation
+- **clientId**: The unique identifier assigned to the client during creation (e.g., "5C3JSOVVFiVmBoh8mv3I")
+- **clientSecret**: The secret key generated for the client during creation (e.g., "generated_secure_secret_key")
 
 ### Response Format
 
@@ -141,16 +182,17 @@ Upon successful login, the system returns a JWT token and client details:
 ```json
 {
   "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJZCI6ImNsaWVudF8xMjM0NWFiY2RlIiwidHlwZSI6ImNsaWVudCIsImlhdCI6MTcxMTAyMjQwMH0...",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJZCI6IjVDM0pTT1ZWRmlWbUJvaDhtdjNJIiwidHlwZSI6ImNsaWVudCIsImlhdCI6MTcxMTAyMjQwMH0...",
   "client": {
-    "clientId": "client_12345abcde",
+    "clientId": "5C3JSOVVFiVmBoh8mv3I",
+    "calId": "e0JBV5PARC9sbebxcYnY",
     "status": "Active",
-    "twilioPhoneNumber": "+18001234567",
-    "agentId": "agent_id_here",
+    "twilioPhoneNumber": "+18632704910",
+    "agentId": "qvu7240QhEUKLultBI7i",
     "clientMeta": {
-      "fullName": "John Doe",
-      "businessName": "Acme Corp",
-      "email": "john@example.com"
+      "fullName": "Paul Giovanatto",
+      "businessName": "Affinity Design",
+      "email": "paul@affinitydesign.ca"
     }
   }
 }
@@ -168,7 +210,7 @@ The client must include the token in the `Authorization` header for all `/secure
 
 ```bash
 curl -X GET https://api.v1.affinitydesign.ca/secure/client \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJZCI6ImNsaWVudF8xMjM0NWFiY2RlIiwidHlwZSI6ImNsaWVudCIsImlhdCI6MTcxMTAyMjQwMH0..."
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJZCI6IjVDM0pTT1ZWRmlWbUJvaDhtdjNJIiwidHlwZSI6ImNsaWVudCIsImlhdCI6MTcxMTAyMjQwMH0..."
 ```
 
 #### Error Responses
@@ -199,7 +241,7 @@ curl -X GET https://api.v1.affinitydesign.ca/secure/client \
 If you need to view or regenerate the client secret (e.g., for initial setup or if lost), use the reset secret endpoint:
 
 ```bash
-curl -X POST https://api.v1.affinitydesign.ca/admin/clients/client_12345abcde/reset-secret \
+curl -X POST https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I/reset-secret \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
@@ -209,7 +251,7 @@ Response:
 {
   "message": "Client secret reset successfully",
   "client": {
-    "clientId": "client_12345abcde",
+    "clientId": "5C3JSOVVFiVmBoh8mv3I",
     "clientSecret": "newly_generated_client_secret"
   }
 }
@@ -219,7 +261,7 @@ Response:
 
 ## Next Steps After Creating a Client
 
-After creating a client account and setting up their access token, you should:
+After creating a client account, linking it to a GHL sub-account (if applicable), and setting up their access token, you should:
 
 1. Securely provide the client with their `clientId` and `clientSecret` for API authentication
 2. Instruct the client to log in using `POST /auth/login` to obtain their JWT token
@@ -235,7 +277,7 @@ If you receive a 409 Conflict error, the client email address may already exist 
 ```json
 {
   "error": "Client already exists with this ID or email",
-  "details": "E11000 duplicate key error collection: clients index: clientMeta.email_1 dup key: { clientMeta.email: \"john@example.com\" }"
+  "details": "E11000 duplicate key error collection: clients index: clientMeta.email_1 dup key: { clientMeta.email: \"paul@affinitydesign.ca\" }"
 }
 ```
 
@@ -258,7 +300,16 @@ If the Twilio phone number is incorrectly formatted or not provisioned in your T
 }
 ```
 
-**Resolution**: Ensure the phone number is in E.164 format (+12125551234) and properly provisioned in your Twilio account.
+**Resolution**: Ensure the phone number is in E.164 format (+18632704910) and properly provisioned in your Twilio account.
+
+### GHL Authorization Failure
+
+If the GHL authorization URL fails (e.g., redirect doesn’t occur):
+
+- **Invalid Client ID or Redirect URI**:
+  Ensure the `GHL_CLIENT_ID` and `GHL_REDIRECT_URI` match what’s registered in the GHL Developer Marketplace.
+- **User Not Logged In**:
+  The user must be logged into the GHL sub-account to approve the app.
 
 ### Login Failure Due to Inactive Status
 
@@ -272,6 +323,7 @@ If a client’s status is "Inactive" or "Suspended", login will fail:
 
 **Resolution**: Ensure the client’s status is "Active" using the `/admin/clients/:clientId` endpoint to update it.
 
+````markdown
 ## Client Account Statuses
 
 A client account can have one of the following statuses:
@@ -280,17 +332,283 @@ A client account can have one of the following statuses:
 - **Inactive**: The client cannot authenticate (typically used for clients no longer using the service)
 - **Suspended**: The client cannot authenticate (typically used for temporary suspension due to billing or other issues)
 
+## Updating Client Account Details
+
+After a client account is created, you may need to update its details, such as the calendar ID, contact information, or status. This can be done using the update client endpoint.
+
+### API Endpoint Details
+
+**Endpoint:** `PUT /admin/clients/:clientId`  
+**Authentication:** Admin token required  
+**Content-Type:** application/json
+
+### Request Format
+
+Below is the API request to update an existing client account:
+
+```bash
+curl -X PUT https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "calId": "e0JBV5PARC9sbebxcYnY",
+    "clientMeta": {
+      "fullName": "Paul Giovanatto",
+      "email": "paul@affinitydesign.ca",
+      "phone": "+19058363456",
+      "businessName": "Affinity Design",
+      "city": "Canada",
+      "jobTitle": "CEO",
+      "notes": "The Boss ;)"
+    },
+    "agentId": "qvu7240QhEUKLultBI7i",
+    "twilioPhoneNumber": "+18632704910",
+    "status": "Active"
+  }'
+```
+````
+
+### Request Field Descriptions
+
+All fields are optional for updates. Only the fields provided in the request will be updated.
+
+- **calId**: The GHL calendar ID for the sub-account (e.g., "e0JBV5PARC9sbebxcYnY")
+- **clientMeta.fullName**: The client's full name (e.g., "Paul Giovanatto")
+- **clientMeta.email**: The client's email address (e.g., "paul@affinitydesign.ca")
+- **clientMeta.phone**: The client's phone number (in E.164 format, e.g., "+19058363456")
+- **clientMeta.businessName**: The client's company or organization name (e.g., "Affinity Design")
+- **clientMeta.city**: The client's city or region (e.g., "Canada")
+- **clientMeta.jobTitle**: The client's professional title (e.g., "CEO")
+- **clientMeta.notes**: Additional information about the client (e.g., "The Boss ;)")
+- **agentId**: The ID of the ElevenLabs conversational agent (e.g., "qvu7240QhEUKLultBI7i")
+- **twilioPhoneNumber**: The Twilio phone number (in E.164 format, e.g., "+18632704910")
+- **status**: Client account status (e.g., "Active", "Inactive", "Suspended")
+
+### Response Format
+
+Upon successful update, the system returns the updated client details:
+
+```json
+{
+  "message": "Client updated successfully",
+  "client": {
+    "clientId": "5C3JSOVVFiVmBoh8mv3I",
+    "calId": "e0JBV5PARC9sbebxcYnY",
+    "status": "Active",
+    "agentId": "qvu7240QhEUKLultBI7i",
+    "twilioPhoneNumber": "+18632704910",
+    "clientMeta": {
+      "fullName": "Paul Giovanatto",
+      "email": "paul@affinitydesign.ca",
+      "phone": "+19058363456",
+      "businessName": "Affinity Design",
+      "city": "Canada",
+      "jobTitle": "CEO",
+      "notes": "The Boss ;)"
+    },
+    "updatedAt": "2025-03-20T12:30:00.000Z"
+  }
+}
 ```
 
----
+#### Error Responses
 
-### Changes Made
-1. **New Section**: Added "Setting Up a Client Access Token" after the client creation process, detailing the `/auth/login` endpoint.
-2. **Request Example**: Included a `curl` command for `POST /auth/login` with `clientId` and `clientSecret`.
-3. **Response Details**: Provided a sample JSON success response with a token, plus error cases (invalid credentials, missing fields).
-4. **Usage Guidance**: Explained how to use the token in subsequent requests and noted its non-expiring nature.
-5. **Troubleshooting**: Added a note about login failures due to inactive status.
-6. **Next Steps**: Updated to include obtaining the JWT token as a step.
+- **Client Not Found**:
 
-This aligns with your app’s `auth.js` logic (e.g., `handleClientLogin`) and ensures clients can authenticate post-creation. Let me know if you need further adjustments!
+  ```json
+  {
+    "error": "Client not found"
+  }
+  ```
+
+  **Status Code**: 404 Not Found
+
+- **Duplicate Email**:
+  ```json
+  {
+    "error": "Client already exists with this email",
+    "details": "E11000 duplicate key error collection: clients index: clientMeta.email_1 dup key: { clientMeta.email: \"paul@affinitydesign.ca\" }"
+  }
+  ```
+  **Status Code**: 409 Conflict
+
+## Deleting a Client Account
+
+If a client account is no longer needed, an admin can delete it using the delete client endpoint. This action is permanent and cannot be undone.
+
+### API Endpoint Details
+
+**Endpoint:** `DELETE /admin/clients/:clientId`  
+**Authentication:** Admin token required
+
+### Request Format
+
+Below is the API request to delete a client account:
+
+```bash
+curl -X DELETE https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Response Format
+
+Upon successful deletion, the system returns a confirmation message:
+
+```json
+{
+  "message": "Client deleted successfully",
+  "clientId": "5C3JSOVVFiVmBoh8mv3I"
+}
+```
+
+#### Error Responses
+
+- **Client Not Found**:
+  ```json
+  {
+    "error": "Client not found"
+  }
+  ```
+  **Status Code**: 404 Not Found
+
+> **Warning**: Deleting a client account will remove all associated data, including call history and GHL integration tokens. Ensure you have backed up any necessary information before proceeding.
+
+## Viewing Client Details
+
+Admins can retrieve the details of a specific client account using the get client endpoint. This is useful for verifying client information or debugging issues.
+
+### API Endpoint Details
+
+**Endpoint:** `GET /admin/clients/:clientId`  
+**Authentication:** Admin token required
+
+### Request Format
+
+Below is the API request to retrieve a client’s details:
+
+```bash
+curl -X GET https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Response Format
+
+The system returns the client’s details:
+
+```json
+{
+  "client": {
+    "clientId": "5C3JSOVVFiVmBoh8mv3I",
+    "calId": "e0JBV5PARC9sbebxcYnY",
+    "status": "Active",
+    "agentId": "qvu7240QhEUKLultBI7i",
+    "twilioPhoneNumber": "+18632704910",
+    "clientMeta": {
+      "fullName": "Paul Giovanatto",
+      "email": "paul@affinitydesign.ca",
+      "phone": "+19058363456",
+      "businessName": "Affinity Design",
+      "city": "Canada",
+      "jobTitle": "CEO",
+      "notes": "The Boss ;)"
+    },
+    "createdAt": "2025-03-20T12:00:00.000Z",
+    "updatedAt": "2025-03-20T12:30:00.000Z"
+  }
+}
+```
+
+#### Error Responses
+
+- **Client Not Found**:
+  ```json
+  {
+    "error": "Client not found"
+  }
+  ```
+  **Status Code**: 404 Not Found
+
+## Listing All Clients
+
+Admins can retrieve a list of all client accounts in the system, which is useful for administrative oversight.
+
+### API Endpoint Details
+
+**Endpoint:** `GET /admin/clients`  
+**Authentication:** Admin token required
+
+### Request Format
+
+Below is the API request to list all clients:
+
+```bash
+curl -X GET https://api.v1.affinitydesign.ca/admin/clients \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Response Format
+
+The system returns a list of all clients:
+
+```json
+{
+  "clients": [
+    {
+      "clientId": "5C3JSOVVFiVmBoh8mv3I",
+      "calId": "e0JBV5PARC9sbebxcYnY",
+      "status": "Active",
+      "agentId": "qvu7240QhEUKLultBI7i",
+      "twilioPhoneNumber": "+18632704910",
+      "clientMeta": {
+        "fullName": "Paul Giovanatto",
+        "email": "paul@affinitydesign.ca",
+        "phone": "+19058363456",
+        "businessName": "Affinity Design",
+        "city": "Canada",
+        "jobTitle": "CEO",
+        "notes": "The Boss ;)"
+      },
+      "createdAt": "2025-03-20T12:00:00.000Z",
+      "updatedAt": "2025-03-20T12:30:00.000Z"
+    }
+    // Additional clients...
+  ],
+  "total": 1
+}
+```
+
+#### Response Fields
+
+- **clients**: Array of client objects
+- **total**: Total number of clients in the system
+
+## Best Practices
+
+1. **Secure Storage of Credentials**:
+
+   - Ensure the `clientSecret` is stored securely by the client and not exposed in logs or public repositories.
+   - Use environment variables for sensitive data like `GHL_CLIENT_ID` and `GHL_CLIENT_SECRET`.
+
+2. **GHL Integration**:
+
+   - Always link the client to a GHL sub-account immediately after creation if GHL features are required, to avoid delays in functionality.
+   - Verify the `calId` is correct by testing it with the GHL API (e.g., via `/get-availability`) before saving it.
+
+3. **Client Communication**:
+
+   - After creation, provide the client with clear instructions on how to log in and use their access token.
+   - If GHL integration is required, ensure the sub-account owner is ready to authorize the app during setup.
+
+4. **Regular Audits**:
+   - Periodically review client accounts to ensure their statuses are accurate (e.g., mark inactive clients as "Inactive").
+   - Check for outdated `calId` values if the GHL sub-account’s calendar configuration changes.
+
+## Additional Resources
+
+- **GHL Developer Documentation**: For more details on GHL OAuth and API usage, refer to the [GHL Developer Portal](https://developers.gohighlevel.com).
+- **Twilio Documentation**: For Twilio phone number provisioning and usage, see the [Twilio Voice API Docs](https://www.twilio.com/docs/voice).
+- **ElevenLabs Documentation**: For agent ID setup and usage, refer to the [ElevenLabs API Docs](https://elevenlabs.io/docs).
+
+```
+
 ```
