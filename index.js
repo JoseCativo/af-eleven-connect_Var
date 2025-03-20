@@ -946,44 +946,117 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
   reply.type("text/xml").send(twimlResponse);
 });
 
-// New endpoint to serve personalized data for inbound calls TODO test
+// Secure endpoint for personalizing inbound call experiences TODO test
 fastify.post("/get-info", async (request, reply) => {
-  const { caller_id, agent_id, called_number, call_sid } = request.body;
-
-  // Generate a request ID for tracking
+  const { caller_id, called_number, agent_id, call_sid } = request.body;
   const requestId =
     Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
-  console.log(`get info endpoint:`, { body: request.body });
+  console.log(
+    `[${requestId}] Processing inbound call personalization request:`,
+    { caller_id, called_number }
+  );
 
-  // TODO: In the future, you could perform a lookup here based on caller_id
-  // For example, query a CRM to get customer information
+  // Validate required parameters
+  if (!caller_id || !called_number) {
+    console.log(`[${requestId}] Missing required parameters`);
+    return reply.code(400).send({
+      error: "Missing required parameters",
+      requiredParams: ["caller_id", "called_number"],
+    });
+  }
 
-  const dynamic_variables = {
-    customer_name: "Paul Giovanatto",
-    email: "paulgiovanatto@gmail.com",
-    company: "Affinity Design",
-    jobTitle: "CEO",
-    city: "Toronto",
-  };
-  // For now, return placeholder data
-  const response = {
-    dynamic_variables: dynamic_variables,
-    conversation_config_override: {
-      agent: {
-        first_message: `Hi ${dynamic_variables.customer_name}?`,
-        //   prompt: {
-        //     prompt:
-        //       "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
-        //   },
+  try {
+    // Find client by matching the called number with twilioPhoneNumber in our database
+    const client = await Client.findOne({ twilioPhoneNumber: called_number });
+
+    if (!client) {
+      console.log(
+        `[${requestId}] No client found for called number: ${called_number}`
+      );
+      return reply.send({
+        conversation_config_override: {
+          agent: {
+            first_message: "Hello!",
+          },
+        },
+      });
+    }
+
+    console.log(
+      `[${requestId}] Found client: ${client.clientId}, checking for GHL integration`
+    );
+
+    // Check if client has GHL integration (accessToken)
+    if (!client.accessToken) {
+      console.log(`[${requestId}] Client has no GHL access token`);
+      return reply.send({
+        conversation_config_override: {
+          agent: {
+            first_message: "Hello!",
+          },
+        },
+      });
+    }
+
+    // Search for the caller in GHL using the client's access token
+    const contact = await searchGhlContactByPhone(
+      client.accessToken,
+      caller_id
+    );
+
+    // If no contact found in GHL, return default greeting
+    if (!contact) {
+      console.log(
+        `[${requestId}] No contact found in GHL for caller: ${caller_id}`
+      );
+      return reply.send({
+        conversation_config_override: {
+          agent: {
+            first_message: "Hello!",
+          },
+        },
+      });
+    }
+
+    // Map GHL contact data to dynamic variables
+    const dynamic_variables = {
+      customer_name:
+        `${contact.firstName || ""} ${contact.lastName || ""}`.trim() ||
+        "Customer",
+      email: contact.email || "",
+      company: contact.companyName || "",
+      jobTitle: contact.title || "",
+      city: contact.city || "",
+    };
+
+    console.log(
+      `[${requestId}] Successfully retrieved contact information from GHL`
+    );
+
+    // Return personalized response with dynamic variables
+    return reply.send({
+      dynamic_variables,
+      conversation_config_override: {
+        agent: {
+          first_message: `Hi ${
+            dynamic_variables.customer_name.split(" ")[0] || "there"
+          }!`,
+        },
       },
-    },
-  };
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Error personalizing call:`, error);
 
-  // Log the response for debugging
-  console.log(`[${requestId}] Returning personalization data`);
-
-  reply.send(response);
+    // Return default response on error
+    return reply.send({
+      conversation_config_override: {
+        agent: {
+          first_message: "Hello!",
+        },
+      },
+    });
+  }
 });
 
 fastify.post("/get-ghl-info", async (request, reply) => {
@@ -1431,20 +1504,42 @@ fastify.post("/book-appointment", async (request, reply) => {
 fastify.post("/call-status", async (request, reply) => {
   const { CallSid, CallStatus, CallDuration } = request.body;
   const requestId = request.query.requestId || "unknown";
+  const clientId = request.query.clientId || null;
 
   console.log(`[${requestId}] Call status update: ${CallSid} -> ${CallStatus}`);
 
-  // Update call data if we're tracking it
-  if (configStore.callHistory && configStore.callHistory.has(CallSid)) {
-    const callData = configStore.callHistory.get(CallSid);
-    callData.status = CallStatus;
-    if (CallDuration) {
-      callData.duration = parseInt(CallDuration);
-    }
-    configStore.callHistory.set(CallSid, callData);
-  }
+  try {
+    // Find the client with this call in their history
+    const query = clientId
+      ? { clientId, "callHistory.callData.callSid": CallSid }
+      : { "callHistory.callData.callSid": CallSid };
 
-  reply.send({ success: true });
+    const updateResult = await Client.findOneAndUpdate(
+      query,
+      {
+        $set: {
+          "callHistory.$.callData.status": CallStatus,
+          "callHistory.$.callData.duration": CallDuration
+            ? parseInt(CallDuration)
+            : undefined,
+          "callHistory.$.callData.endTime":
+            CallStatus === "completed" ? new Date() : undefined,
+        },
+      },
+      { new: true }
+    );
+
+    if (!updateResult) {
+      console.error(
+        `[${requestId}] Failed to update call status: Record not found`
+      );
+    }
+
+    reply.send({ success: true });
+  } catch (error) {
+    console.error(`[${requestId}] Error updating call status:`, error);
+    reply.send({ success: false, error: error.message });
+  }
 });
 
 // Start the Fastify server

@@ -74,4 +74,50 @@ async function makeGhlApiCall(clientId, endpoint, method = "GET", body = null) {
   return response.json();
 }
 
-module.exports = { refreshGhlToken, makeGhlApiCall };
+/**
+ * Search for a contact in GoHighLevel by phone number
+ * @param {string} accessToken - GHL access token
+ * @param {string} phoneNumber - Phone number to search for
+ * @returns {Promise<Object|null>} - Contact information or null if not found
+ */
+async function searchGhlContactByPhone(accessToken, phoneNumber) {
+  if (!accessToken || !phoneNumber) {
+    console.error("Missing required parameters for GHL contact search");
+    return null;
+  }
+
+  try {
+    // Prepare the request according to GHL API specifications
+    const response = await fetch(
+      "https://services.gohighlevel.com/v2/contacts/search",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Version: "2021-07-28",
+        },
+        body: JSON.stringify({
+          query: phoneNumber, // Search by phone number
+          limit: 1, // Only need first match
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      console.error(`GHL API error: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const data = await response.json();
+
+    // Return first matching contact or null
+    return data.contacts && data.contacts.length > 0 ? data.contacts[0] : null;
+  } catch (error) {
+    console.error("Error searching GHL contact:", error);
+    return null;
+  }
+}
+
+// Add export to existing export
+module.exports = { refreshGhlToken, makeGhlApiCall, searchGhlContactByPhone };
