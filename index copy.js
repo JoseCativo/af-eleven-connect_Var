@@ -6,6 +6,7 @@ import fastifyFormBody from "@fastify/formbody";
 import fastifyWs from "@fastify/websocket";
 import Twilio from "twilio";
 import fetch from "node-fetch";
+import getCustomizedPrompt from './scriptHelper.js';
 
 // Load environment variables from .env file for default values
 dotenv.config();
@@ -23,6 +24,7 @@ const configStore = {
     ? [process.env.ELEVENLABS_AGENT_ID]
     : [],
 
+  GHL_API_KEY: process.env.GHL_API_KEY,
   // Active connections
   activeConnections: new Map(), // Map of streamSid to connection info
 };
@@ -227,6 +229,33 @@ fastify.get("/config", async (request, reply) => {
     elevenLabsAgentIds: configStore.ELEVENLABS_AGENT_IDS,
     activeConnections: Array.from(configStore.activeConnections.keys()).length,
   });
+});
+// Add a new API endpoint to configure the Go High Level API key
+fastify.post("/config/ghl-api-key", async (request, reply) => {
+  const { apiKey } = request.body;
+
+  if (!apiKey) {
+    return reply.status(400).send({
+      error: "API key is required",
+    });
+  }
+
+  try {
+    // You might want to validate the API key by making a test request to GHL
+    // For now, we'll just store it
+    configStore.GHL_API_KEY = apiKey;
+
+    reply.send({
+      success: true,
+      message: "Go High Level API key updated successfully",
+    });
+  } catch (error) {
+    console.error("Error updating Go High Level API key:", error);
+    reply.status(500).send({
+      error: "Failed to update Go High Level API key",
+      details: error.message,
+    });
+  }
 });
 // API to configure elevin labs agents credentials
 fastify.post("/config/elevenlabs-agents", async (request, reply) => {
@@ -452,39 +481,114 @@ fastify.register(async (fastifyInstance) => {
     { websocket: true },
     (ws, req) => {
       console.info("[Server] Twilio connected to outbound media stream");
+      console.log("[Server] Query parameters:", req.query);
+      console.log("[Server] Query req body:", req.requestBody);
+      console.log("[Server] Query body:", req.body);
 
       // Variables to track the call
       let streamSid = null;
       let callSid = null;
       let elevenLabsWs = null;
-      let customParameters = null; // Add this to store parameters
+      let customParameters = null;
+      let isElevenLabsReady = false;
+      let messageQueue = []; // Queue to store messages until ElevenLabs is ready
+      let clientInfo = null; // Store client information from get-info API
 
       // Handle WebSocket errors
-      ws.on("error", console.error);
+      ws.on("error", (error) => {
+        console.error("[Twilio WebSocket] Error:", error);
+      });
 
-      // Set up ElevenLabs connection
+      // Process any queued messages
+      const processQueuedMessages = () => {
+        if (!isElevenLabsReady || !elevenLabsWs || messageQueue.length === 0)
+          return;
+
+        console.log(
+          `[ElevenLabs] Processing ${messageQueue.length} queued messages`
+        );
+
+        while (messageQueue.length > 0) {
+          const msg = messageQueue.shift();
+          try {
+            if (elevenLabsWs.readyState === WebSocket.OPEN) {
+              elevenLabsWs.send(JSON.stringify(msg));
+            }
+          } catch (error) {
+            console.error("[ElevenLabs] Error sending queued message:", error);
+          }
+        }
+      };
+
+      // Set up ElevenLabs connection - but we'll call this after receiving start event
       const setupElevenLabs = async () => {
         try {
-          const signedUrl = await getSignedUrl();
+          // Use the agent ID from parameters or default
+          const agentId =
+            customParameters?.agentId ||
+            req.query.agentId ||
+            configStore.ELEVENLABS_AGENT_IDS[0];
+
+          if (!agentId) {
+            throw new Error("No agent ID available");
+          }
+
+          console.log(
+            `[ElevenLabs] Setting up connection with agent ID: ${agentId}`
+          );
+          const signedUrl = await getSignedUrl(agentId);
+
           elevenLabsWs = new WebSocket(signedUrl);
+
+          elevenLabsWs.on("error", (error) => {
+            console.error("[ElevenLabs] WebSocket error:", error);
+          });
 
           elevenLabsWs.on("open", () => {
             console.log("[ElevenLabs] Connected to Conversational AI");
 
-            //    TODO Send initial configuration with prompt and first message
-            const initialConfig = {
-              type: "conversation_initiation_client_data",
-              conversation_config_override: {
-                agent: {
-                  first_message:
-                    customParameters?.first_message ||
-                    "hey there! how can I help you today?",
-                },
-              },
-            };
+            try {
+              // Create the config with proper format TODO test
 
-            // Send the configuration to ElevenLabs
-            elevenLabsWs.send(JSON.stringify(initialConfig));
+               // Extract dynamic variables from custom parameters
+               const dynamicVariables = {};
+              
+               // Add each parameter as a dynamic variable if it exists
+               if (customParameters?.full_name) dynamicVariables.full_name = customParameters.full_name;
+               if (customParameters?.business_name) dynamicVariables.business_name = customParameters.business_name;
+               if (customParameters?.city) dynamicVariables.city = customParameters.city;
+               if (customParameters?.job_title) dynamicVariables.job_title = customParameters.job_title;
+               if (customParameters?.email) dynamicVariables.email = customParameters.email;
+               if (customParameters?.phone) dynamicVariables.phone = customParameters.phone;
+ 
+               // Create the initialization config with dynamic variables
+               const initialConfig = {
+                 type: "conversation_initiation_client_data",
+                 dynamic_variables: dynamicVariables,
+                 conversation_config_override: {
+                   agent: {
+                     first_message: customParameters?.first_message || "Hello, how can I help you today?",
+                   },
+                 },
+               };
+
+              console.log(
+                "[ElevenLabs] Sending initial config with dynamic variables:",
+                JSON.stringify(initialConfig)
+              );
+
+              // Send the configuration to ElevenLabs
+              elevenLabsWs.send(JSON.stringify(initialConfig));
+
+              // Mark as ready and process any queued messages
+              isElevenLabsReady = true;
+              processQueuedMessages();
+            } catch (configError) {
+              console.error(
+                "[ElevenLabs] Error preparing configuration:",
+                configError
+              );
+            }
           });
 
           elevenLabsWs.on("message", (data) => {
@@ -495,36 +599,31 @@ fastify.register(async (fastifyInstance) => {
                 case "conversation_initiation_metadata":
                   console.log("[ElevenLabs] Received initiation metadata");
                   break;
+
                 case "audio":
                   if (message.audio_event?.audio_base_64) {
-                    const audioData = {
-                      event: "media",
-                      streamSid,
-                      media: {
-                        payload: message.audio_event.audio_base_64,
-                      },
-                    };
-                    ws.send(JSON.stringify(audioData));
+                    if (streamSid) {
+                      console.log("[ElevenLabs] Sending audio to Twilio");
+                      ws.send(
+                        JSON.stringify({
+                          event: "media",
+                          streamSid,
+                          media: {
+                            payload: message.audio_event.audio_base_64,
+                          },
+                        })
+                      );
+                    } else {
+                      console.log(
+                        "[ElevenLabs] Have audio but no StreamSid yet"
+                      );
+                    }
+                  }
+                  break;
 
-                    break;
-                  } else {
-                    console.log(
-                      "[ElevenLabs] Received audio but no StreamSid yet"
-                    );
-                  }
-                  break;
-                case "interruption":
-                  if (streamSid) {
-                    ws.send(
-                      JSON.stringify({
-                        event: "clear",
-                        streamSid,
-                      })
-                    );
-                  }
-                  break;
                 case "ping":
                   if (message.ping_event?.event_id) {
+                    console.log("[ElevenLabs] Received ping, sending pong");
                     elevenLabsWs.send(
                       JSON.stringify({
                         type: "pong",
@@ -533,16 +632,31 @@ fastify.register(async (fastifyInstance) => {
                     );
                   }
                   break;
+
                 case "agent_response":
                   console.log(
                     `[Twilio] Agent response: ${message.agent_response_event?.agent_response}`
                   );
                   break;
+
                 case "user_transcript":
                   console.log(
                     `[Twilio] User transcript: ${message.user_transcription_event?.user_transcript}`
                   );
                   break;
+
+                case "interruption":
+                  if (streamSid) {
+                    console.log("[ElevenLabs] Sending clear event to Twilio");
+                    ws.send(
+                      JSON.stringify({
+                        event: "clear",
+                        streamSid,
+                      })
+                    );
+                  }
+                  break;
+
                 default:
                   console.log(
                     `[ElevenLabs] Unhandled message type: ${message.type}`
@@ -553,48 +667,84 @@ fastify.register(async (fastifyInstance) => {
             }
           });
 
-          elevenLabsWs.on("error", (error) => {
-            console.error("[ElevenLabs] WebSocket error:", error);
-          });
-
-          elevenLabsWs.on("close", () => {
-            console.log("[ElevenLabs] Disconnected");
+          elevenLabsWs.on("close", (code, reason) => {
+            console.log(
+              `[ElevenLabs] Disconnected: Code: ${code}, Reason: ${
+                reason || "No reason provided"
+              }`
+            );
+            isElevenLabsReady = false;
           });
         } catch (error) {
           console.error("[ElevenLabs] Setup error:", error);
         }
       };
 
-      // Set up ElevenLabs connection
-      setupElevenLabs();
-
       // Handle messages from Twilio
       ws.on("message", async (message) => {
         try {
-          const data = JSON.parse(message);
-          switch (data.event) {
+          const msg = JSON.parse(message);
+
+          switch (msg.event) {
             case "start":
-              streamSid = message.start.streamSid;
-              callSid = message.start.callSid;
-              customParameters = message.start.customParameters; // Store parameters
-              console.log(`[Twilio] Stream started with ID: ${streamSid}`);
+              streamSid = msg.start.streamSid;
+              callSid = msg.start.callSid;
+              customParameters = msg.start.customParameters || {};
+
+              console.log(
+                `[Twilio] Stream started - StreamSid: ${streamSid}, CallSid: ${callSid}`
+              );
+              console.log(
+                "[Twilio] Start parameters:",
+                JSON.stringify(customParameters || {})
+              );
+
+              // Now that we have the parameters, set up ElevenLabs
+              await setupElevenLabs();
               break;
+
             case "media":
-              if (elevenLabsWs.readyState === WebSocket.OPEN) {
+              if (
+                isElevenLabsReady &&
+                elevenLabsWs &&
+                elevenLabsWs.readyState === WebSocket.OPEN
+              ) {
+                // Connection is ready, send immediately
                 const audioMessage = {
                   user_audio_chunk: Buffer.from(
-                    data.media.payload,
+                    msg.media.payload,
                     "base64"
                   ).toString("base64"),
                 };
                 elevenLabsWs.send(JSON.stringify(audioMessage));
+              } else if (elevenLabsWs) {
+                // Connection exists but not ready, queue the message
+                console.log(
+                  "[Twilio] Queueing audio message until ElevenLabs is ready"
+                );
+                messageQueue.push({
+                  user_audio_chunk: Buffer.from(
+                    msg.media.payload,
+                    "base64"
+                  ).toString("base64"),
+                });
+              } else {
+                // No connection yet, just log
+                console.log(
+                  "[Twilio] Received audio but ElevenLabs connection not initialized yet"
+                );
               }
               break;
+
             case "stop":
-              elevenLabsWs.close();
+              console.log(`[Twilio] Stream ${streamSid} ended`);
+              if (elevenLabsWs && elevenLabsWs.readyState === WebSocket.OPEN) {
+                elevenLabsWs.close(1000, "Call completed");
+              }
               break;
+
             default:
-              console.log(`[Twilio] Received unhandled event: ${data.event}`);
+              console.log(`[Twilio] Unhandled event: ${msg.event}`);
           }
         } catch (error) {
           console.error("[Twilio] Error processing message:", error);
@@ -604,15 +754,9 @@ fastify.register(async (fastifyInstance) => {
       // Handle WebSocket closure
       ws.on("close", () => {
         console.log("[Twilio] Client disconnected");
-        if (elevenLabsWs?.readyState === WebSocket.OPEN) {
-          elevenLabsWs.close();
+        if (elevenLabsWs && elevenLabsWs.readyState === WebSocket.OPEN) {
+          elevenLabsWs.close(1000, "Twilio disconnected");
         }
-      });
-
-      // Handle WebSocket closure
-      ws.on("error", () => {
-        console.error("[Twilio] WebSocket error:", error);
-        elevenLabsWs.close();
       });
     }
   );
@@ -635,78 +779,102 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { to, phoneNumber, agentId, first_message } = request.body;
+  const { full_name, business_name, city, job_title, email, phone, from } = request.body;
 
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
+  const agentId = configStore.ELEVENLABS_AGENT_IDS[0];
+  const phoneRegex = /^\+[1-9]\d{1,14}$/;
+  const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  
   console.log(`[${requestId}] Outbound call request received`);
 
   // Input validation
-  if (!to) {
+  if (!phone) {
     console.log(`[${requestId}] Error: Destination phone number missing`);
     return reply.status(400).send({
       error: "Destination phone number is required",
       requestId,
     });
   }
-
-  // Validate phone number format (basic E.164 check)
-  const phoneRegex = /^\+[1-9]\d{1,14}$/;
-  if (!phoneRegex.test(to)) {
-    console.log(
-      `[${requestId}] Error: Invalid destination phone format: ${to}`
-    );
+ 
+  if (!phoneRegex.test(phone)) {
+    console.log(`[${requestId}] Error: Invalid destination phone format: ${phone}`);
     return reply.status(400).send({
       error: "Phone number must be in E.164 format (e.g., +12125551234)",
       requestId,
     });
   }
 
-  // Additional validations remain the same...
-
   try {
-    console.log(
-      `[${requestId}] Initiating call from ${phoneNumber} to ${to} using agent ${agentId}`
-    );
+    // Select phone number to use (from query param or first configured number)
+    const phoneNumber = from || configStore.TWILIO_PHONE_NUMBERS[0];
+    
+    if (!phoneNumber) {
+      throw new Error("No Twilio phone number available");
+    }
 
-    // Build the webhook URL with all parameters
-    const params = new URLSearchParams();
-    if (phoneNumber) params.append("phoneNumber", phoneNumber);
-    if (agentId) params.append("agentId", agentId);
-    if (first_message) params.append("first_message", first_message);
+    // Create first message (kept short for URL)
+    const firstName = full_name ? full_name.split(' ')[0] : '';
+    const first_message = `${firstName ? firstName : 'Hello'}?`;
 
-    // send to twiml
-    const webhookUrl = `https://${
-      request.headers.host
-    }/outbound-call-twiml?first_message=${encodeURIComponent(first_message)}`;
+    // Build the webhook URL with all dynamic variables
+    let webhookUrl = `https://${request.headers.host}/outbound-call-twiml?`;
+    
+    // Add parameters to the URL
+    const params = {
+      first_message,
+      full_name,
+      business_name,
+      city,
+      job_title,
+      email,
+      phone,
+      requestId
+    };
+    
+    // Convert parameters to URL query string
+    const queryParams = [];
+    for (const [key, value] of Object.entries(params)) {
+      if (value) {
+        queryParams.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+      }
+    }
+    
+    webhookUrl += queryParams.join('&');
+    
+    console.log(`[${requestId}] Using webhook URL with dynamic variables`);
 
     // Create the call
     const call = await twilioClient.calls.create({
       url: webhookUrl,
-      to: to,
+      to: phone,
       from: phoneNumber,
       statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
     });
 
-    console.log(
-      `[${requestId}] Outbound call initiated successfully: ${call.sid}`
-    );
+    console.log(`[${requestId}] Outbound call initiated successfully: ${call.sid}`);
 
     // Track the call in our application
     const callData = {
       callSid: call.sid,
       requestId,
-      to,
-      phoneNumber,
-      agentId: agentId,
+      phone,
+      from: phoneNumber,
+      agentId,
       startTime: new Date(),
       status: "initiated",
+      metadata: {
+        full_name,
+        business_name,
+        city,
+        job_title,
+        email,
+        phone
+      }
     };
 
-    // Store call data (could be expanded to a proper database)
+    // Store call data
     if (!configStore.callHistory) {
       configStore.callHistory = new Map();
     }
@@ -715,7 +883,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     reply.send({
       success: true,
       message: "Call initiated successfully",
-      callSid: call.sid,
+      callSid: call.sid
     });
   } catch (error) {
     // Detailed error handling based on the type of error
@@ -775,18 +943,43 @@ fastify.post("/make-outbound-call", async (request, reply) => {
 
 // Route to handle outbound calls from Twilio
 fastify.all("/outbound-call-twiml", async (request, reply) => {
-  const first_message = request.query.first_message || "";
+  // Extract all query parameters for dynamic variables
+  const {
+    first_message,
+    full_name,
+    business_name,
+    city,
+    job_title,
+    email,
+    phone,
+    requestId
+  } = request.query;
 
-  const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Connect>
-          <Stream url="wss://${request.headers.host}/outbound-media-stream">
-            <Parameter name="first_message" value="${first_message}" />
-          </Stream>
-        </Connect>
-      </Response>`;
+  console.log(`[${requestId || 'unknown'}] Generating TwiML with parameters:`, request.query);
 
-  reply.type("text/xml").send(twimlResponse);
+  // Create the TwiML response that passes all variables to the WebSocket stream
+  let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Connect>
+        <Stream url="wss://${request.headers.host}/outbound-media-stream">`;
+  
+  // Add each parameter to the TwiML if it exists
+  if (first_message) twimlResponse += `\n          <Parameter name="first_message" value="${first_message}" />`;
+  if (full_name) twimlResponse += `\n          <Parameter name="full_name" value="${full_name}" />`;
+  if (business_name) twimlResponse += `\n          <Parameter name="business_name" value="${business_name}" />`;
+  if (city) twimlResponse += `\n          <Parameter name="city" value="${city}" />`;
+  if (job_title) twimlResponse += `\n          <Parameter name="job_title" value="${job_title}" />`;
+  if (email) twimlResponse += `\n          <Parameter name="email" value="${email}" />`;
+  if (phone) twimlResponse += `\n          <Parameter name="phone" value="${phone}" />`;
+  if (requestId) twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
+  
+  // Close the TwiML tags
+  twimlResponse += `
+        </Stream>
+      </Connect>
+    </Response>`;
+
+  reply.type('text/xml').send(twimlResponse);
 });
 
 // New endpoint to serve personalized data for inbound calls TODO test
@@ -802,18 +995,19 @@ fastify.post("/get-info", async (request, reply) => {
   // TODO: In the future, you could perform a lookup here based on caller_id
   // For example, query a CRM to get customer information
 
+  const dynamic_variables = {
+    customer_name: "Paul Giovanatto",
+    email: "paulgiovanatto@gmail.com",
+    company: "Affinity Design",
+    jobTitle: "CEO",
+    city: "Toronto",
+  };
   // For now, return placeholder data
   const response = {
-    dynamic_variables: {
-      fullName: "John Doe",
-      email: "paulgiovanatto@gmail.com",
-      company: "Affinity Design",
-      jobTitle: "CEO",
-      city: "Toronto",
-    },
+    dynamic_variables: dynamic_variables,
     conversation_config_override: {
       agent: {
-        first_message: "Hi John, how can I help you today?",
+        first_message: `Hi ${dynamic_variables.customer_name}?`,
         //   prompt: {
         //     prompt:
         //       "You are speaking with John Doe, CEO of Affinity Design based in Toronto. Be friendly, professional, and conversational. Address the customer by their first name when appropriate.",
@@ -826,6 +1020,201 @@ fastify.post("/get-info", async (request, reply) => {
   console.log(`[${requestId}] Returning personalization data`);
 
   reply.send(response);
+});
+
+fastify.post("/get-ghl-info", async (request, reply) => {
+  // Generate a request ID for tracking
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
+  // Extract parameters from request body
+  const { email, phone } = request.body;
+
+  // Extract API key from authorization header
+  const apiKey = request.headers.authorization?.replace("Bearer ", "");
+
+  // Validate required parameters - we need either email or phone
+  if (!email && !phone) {
+    console.log(`[${requestId}] Error: Missing search parameters`);
+    return reply.status(400).send({
+      error: "Either email, phone, or caller_id parameter is required",
+      requestId,
+    });
+  }
+
+  if (!apiKey) {
+    console.log(`[${requestId}] Error: Missing authorization header`);
+    return reply.status(401).send({
+      error: "Authorization header with Bearer token is required",
+      requestId,
+    });
+  }
+
+  // Determine which parameter to use for searching
+  let searchParam = {};
+  let searchValue = "";
+
+  if (email) {
+    searchParam = { email };
+    searchValue = email;
+  } else if (phone) {
+    searchParam = { phone };
+    searchValue = phone;
+  }
+
+  try {
+    console.log(
+      `[${requestId}] Querying Go High Level for contact info: ${searchValue}`
+    );
+
+    // API endpoint for searching contacts
+    const endpoint = "https://services.leadconnectorhq.com/contacts/search";
+
+    // Make the HTTP request to search for the contact
+    const searchResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Version: "2021-07-28",
+      },
+      body: JSON.stringify({
+        ...searchParam,
+        limit: 1, // We only need the first matching contact
+      }),
+    });
+
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      throw new Error(
+        `HTTP error! Status: ${searchResponse.status}, Details: ${errorText}`
+      );
+    }
+
+    const searchResult = await searchResponse.json();
+
+    // Check if we found any matching contacts
+    if (!searchResult.contacts || searchResult.contacts.length === 0) {
+      console.log(
+        `[${requestId}] No contact found with search param: ${searchValue}`
+      );
+
+      // Return default data since we couldn't find a match
+      const defaultResponse = {
+        dynamic_variables: {
+          user_name: "Customer",
+          email: email || "",
+          phone: phone || caller_id || "",
+          company: "",
+          first_name: "",
+          last_name: "",
+        },
+        conversation_config_override: {
+          agent: {
+            first_message:
+              "Hello! Thanks for taking my call today. How are you doing?",
+          },
+        },
+      };
+
+      return reply.send(defaultResponse);
+    }
+
+    // Get the first matching contact
+    const contact = searchResult.contacts[0];
+
+    console.log(
+      `[${requestId}] Found contact: ${contact.firstName} ${contact.lastName}`
+    );
+
+    // Map Go High Level contact fields to our dynamic variables
+    const dynamic_variables = {
+      // Name fields - we need to ensure user_name is properly set
+      user_name: `${contact.firstName || ""} ${contact.lastName || ""}`.trim(),
+      first_name: contact.firstName || "",
+      last_name: contact.lastName || "",
+
+      // Contact information
+      email: contact.email || email || "",
+      phone: contact.phone || phone || "",
+
+      // Company information
+      company: contact.companyName || "",
+      website: contact.website || "",
+
+      // Address information
+      address: contact.address1 || "",
+      city: contact.city || "",
+      state: contact.state || "",
+      postal_code: contact.postalCode || "",
+      country: contact.country || "",
+
+      // Additional fields
+      tags: contact.tags || [],
+      customFields: contact.customFields || {},
+    };
+
+    // Create a personalized first message based on the contact's name
+    const firstName = contact.firstName || "there";
+    const firstMessage = `Hi ${firstName}, this is Alex from Affinity Design. How are you doing today?`;
+
+    // Create a personalized prompt with context about the customer
+    const promptBase = `You are speaking with ${dynamic_variables.user_name}`;
+    const companyContext = dynamic_variables.company
+      ? ` who works at ${dynamic_variables.company}`
+      : "";
+    const locationContext = dynamic_variables.city
+      ? ` based in ${dynamic_variables.city}${
+          dynamic_variables.state ? ", " + dynamic_variables.state : ""
+        }`
+      : "";
+    const promptSuffix = `. Be friendly, professional, and conversational. Address the customer by their first name (${firstName}) when appropriate.`;
+
+    const prompt = promptBase + companyContext + locationContext + promptSuffix;
+
+    // const response = {
+    //   dynamic_variables: dynamic_variables,
+    //   conversation_config_override: {
+    //     agent: {
+    //       first_message: firstMessage,
+    //     }
+    //   }
+    // };
+
+    // Prepare the response object
+    const response = {
+      dynamic_variables: dynamic_variables,
+    };
+
+    // Log the response for debugging (limited to avoid exposing sensitive information)
+    console.log(
+      `[${requestId}] Returning Go High Level contact data for ${dynamic_variables.user_name}`
+    );
+
+    reply.send(response);
+  } catch (error) {
+    console.error(
+      `[${requestId}] Error fetching contact from Go High Level:`,
+      error
+    );
+
+    // Return a default response even if there was an error
+    const defaultResponse = {
+      dynamic_variables: {
+        user_name: "Customer",
+        email: email || "",
+        phone: phone || "",
+        company: "",
+        first_name: "",
+        last_name: "",
+      },
+    };
+
+    // Log the error but still return a valid response to prevent call failures
+    console.log(`[${requestId}] Returning default values due to error`);
+    reply.send(defaultResponse);
+  }
 });
 
 // Route to get a representative's availability
@@ -1094,7 +1483,6 @@ fastify.post("/call-status", async (request, reply) => {
   reply.send({ success: true });
 });
 
-// Start the Fastify server
 // Start the Fastify server
 fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {

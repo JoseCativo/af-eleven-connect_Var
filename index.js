@@ -6,31 +6,103 @@ import fastifyFormBody from "@fastify/formbody";
 import fastifyWs from "@fastify/websocket";
 import Twilio from "twilio";
 import fetch from "node-fetch";
-import getCustomizedPrompt from './scriptHelper.js';
+import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
+import Client from "./client.js";
+import {
+  createClient,
+  findClientById,
+  findClientByPhone,
+  updateClient,
+  addCallToHistory,
+  updateCallDetails,
+  deleteClient,
+} from "./crud.js";
 
-// Load environment variables from .env file for default values
+import {
+  generateToken,
+  generateAdminToken,
+  verifyToken,
+  authenticateClient,
+  authenticateAdmin,
+  handleClientLogin,
+  verifyClientToken,
+} from "./auth.js";
+
+import { authenticateClient, authenticateAdmin } from "./auth.js";
+
+// Import route modules
+import clientRoutes from "./routes/client.js";
+import adminRoutes from "./routes/admin.js";
+import authRoutes from "./routes/auth.js";
+
+// Load environment variables from .env file
 dotenv.config();
 
-// Initialize config store with ElevenLabs API key
+// Connect to MongoDB
+const connectDB = async () => {
+  try {
+    await mongoose.connect(
+      process.env.MONGODB_URI || "mongodb://localhost:27017/clientsDB"
+    );
+    console.log("MongoDB connected successfully");
+  } catch (err) {
+    console.error("MongoDB connection error:", err);
+    process.exit(1);
+  }
+};
+
+// Initialize config store with required API keys
 const configStore = {
-  // Default values from environment variables - these should be strings, not arrays
+  // Environment variables for API keys
+  REDIRECT_URL: process.env.REDIRECT_URL,
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
   TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,
   TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN,
-  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
-  TWILIO_PHONE_NUMBERS: process.env.TWILIO_PHONE_NUMBER
-    ? [process.env.TWILIO_PHONE_NUMBER]
-    : [],
-  ELEVENLABS_AGENT_IDS: process.env.ELEVENLABS_AGENT_ID
-    ? [process.env.ELEVENLABS_AGENT_ID]
-    : [],
-
+  SERVER_SECRET: process.env.SERVER_SECRET,
   GHL_API_KEY: process.env.GHL_API_KEY,
+
   // Active connections
   activeConnections: new Map(), // Map of streamSid to connection info
 };
 
-// Helper function to get signed URL for authenticated ElevenLabs conversations
+// Validate required environment variables
+if (!configStore.TWILIO_ACCOUNT_SID || !configStore.TWILIO_AUTH_TOKEN) {
+  console.error("Missing required Twilio credentials in environment variables");
+  process.exit(1);
+}
+if (!configStore.ELEVENLABS_API_KEY) {
+  console.error("Missing required ElevenLabs API key in environment variables");
+  process.exit(1);
+}
+if (!configStore.TWILIO_ACCOUNT_SID || !configStore.TWILIO_AUTH_TOKEN) {
+  console.error("Missing required Twilio credentials in environment variables");
+  process.exit(1);
+}
 
+// Initialize Fastify server
+const fastify = Fastify({ logger: true });
+// Register route groups
+fastify.register(fastifyWs);
+fastify.register(authRoutes, { prefix: "/auth" });
+fastify.register(clientRoutes, {
+  prefix: "/secure",
+  preHandler: authenticateClient,
+});
+fastify.register(adminRoutes, {
+  prefix: "/admin",
+  preHandler: authenticateAdmin,
+});
+
+// Initialize Twilio client
+const twilioClient = new Twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+
+const PORT = process.env.PORT || 8000;
+
+// Helper function to get signed URL for authenticated ElevenLabs conversations
 async function getSignedUrl(agentId) {
   // If no agentId is provided, use the first one from the config store
   const effectiveAgentId = agentId || configStore.ELEVENLABS_AGENT_IDS[0];
@@ -197,25 +269,6 @@ async function bookGHLAppointment(
   }
 }
 
-// Validate required environment variables
-if (!configStore.TWILIO_ACCOUNT_SID || !configStore.TWILIO_AUTH_TOKEN) {
-  console.error("Missing required Twilio credentials in environment variables");
-  process.exit(1);
-}
-
-// Initialize Fastify server
-const fastify = Fastify();
-fastify.register(fastifyFormBody);
-fastify.register(fastifyWs);
-
-// Initialize Twilio client
-const twilioClient = new Twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
-
-const PORT = process.env.PORT || 8000;
-
 // Config routes ///////////////////////////////////////
 
 // Root route for health check
@@ -223,140 +276,267 @@ fastify.get("/", async (_, reply) => {
   reply.send({ message: "Server is running" });
 });
 // API to get all configuration
-fastify.get("/config", async (request, reply) => {
-  reply.send({
-    twilioPhoneNumbers: configStore.TWILIO_PHONE_NUMBERS,
-    elevenLabsAgentIds: configStore.ELEVENLABS_AGENT_IDS,
-    activeConnections: Array.from(configStore.activeConnections.keys()).length,
-  });
+// Config routes ///////////////////////////////////////
+
+// Root route for health check
+fastify.get("/", async (_, reply) => {
+  reply.send({ message: "Server is running" });
 });
-// Add a new API endpoint to configure the Go High Level API key
-fastify.post("/config/ghl-api-key", async (request, reply) => {
-  const { apiKey } = request.body;
 
-  if (!apiKey) {
-    return reply.status(400).send({
-      error: "API key is required",
-    });
-  }
-
+// API to get server status and configuration
+fastify.get("/status", async (request, reply) => {
   try {
-    // You might want to validate the API key by making a test request to GHL
-    // For now, we'll just store it
-    configStore.GHL_API_KEY = apiKey;
+    // Get count of active clients in database
+    const clientCount = await Client.countDocuments();
 
     reply.send({
-      success: true,
-      message: "Go High Level API key updated successfully",
+      status: "online",
+      mongoDbConnected: mongoose.connection.readyState === 1,
+      activeConnections: Array.from(configStore.activeConnections.keys())
+        .length,
+      clientCount,
     });
   } catch (error) {
-    console.error("Error updating Go High Level API key:", error);
-    reply.status(500).send({
-      error: "Failed to update Go High Level API key",
+    console.error("Error fetching status:", error);
+    reply.code(500).send({
+      status: "error",
+      message: "Failed to fetch server status",
+      error: error.message,
+    });
+  }
+});
+
+// API to create a new client
+fastify.post("/clients", async (request, reply) => {
+  try {
+    // Extract client data from request body
+    const { clientSecret, agentId, twilioPhoneNumber, clientMeta, clientId } =
+      request.body;
+
+    // Validate required fields
+    if (
+      !clientId ||
+      !clientSecret ||
+      !agentId ||
+      !twilioPhoneNumber ||
+      !clientMeta
+    ) {
+      return reply.code(400).send({
+        error: "Missing required client information",
+        requiredFields: [
+          "clientSecret",
+          "agentId",
+          "twilioPhoneNumber",
+          "clientMeta",
+        ],
+      });
+    }
+
+    // Validate client meta required fields
+    if (!clientMeta.fullName || !clientMeta.phone || !clientMeta.email) {
+      return reply.code(400).send({
+        error: "Missing required client meta information",
+        requiredFields: ["fullName", "phone", "email"],
+      });
+    }
+
+    // Generate a unique client ID if not provided
+
+    // Create client object
+    const clientData = {
+      clientId,
+      clientSecret,
+      agentId,
+      twilioPhoneNumber,
+      status: "Active",
+      clientMeta: {
+        fullName: clientMeta.fullName,
+        phone: clientMeta.phone,
+        email: clientMeta.email,
+        businessName: clientMeta.businessName || "",
+        city: clientMeta.city || "",
+        jobTitle: clientMeta.jobTitle || "",
+        notes: clientMeta.notes || "",
+      },
+    };
+
+    // Save client to database
+    const newClient = await createClient(clientData);
+
+    reply.code(201).send({
+      message: "Client created successfully",
+      client: {
+        clientId: newClient.clientId,
+        status: newClient.status,
+        createdAt: newClient.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error("Error creating client:", error);
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return reply.code(409).send({
+        error: "Client already exists with this ID or email",
+        details: error.message,
+      });
+    }
+
+    reply.code(500).send({
+      error: "Failed to create client",
       details: error.message,
     });
   }
 });
-// API to configure elevin labs agents credentials
-fastify.post("/config/elevenlabs-agents", async (request, reply) => {
-  const { agentId, description } = request.body;
 
-  if (!agentId) {
-    return reply.status(400).send({
-      error: "Agent ID is required",
-    });
-  }
-
+// API to get client by ID
+fastify.get("/clients/:clientId", async (request, reply) => {
   try {
-    // We'd ideally validate the agent ID with ElevenLabs API
-    // For now, just add it to our config
-    if (!configStore.ELEVENLABS_AGENT_IDS.includes(agentId)) {
-      configStore.ELEVENLABS_AGENT_IDS.push(agentId);
+    const { clientId } = request.params;
+
+    const client = await findClientById(clientId);
+
+    if (!client) {
+      return reply.code(404).send({
+        error: "Client not found",
+      });
     }
 
-    reply.send({
-      success: true,
-      agentIds: configStore.ELEVENLABS_AGENT_IDS,
-    });
+    reply.send(client);
   } catch (error) {
-    reply.status(500).send({
-      error: "Failed to add agent ID",
+    console.error("Error fetching client:", error);
+    reply.code(500).send({
+      error: "Failed to fetch client",
       details: error.message,
     });
   }
 });
-// API to add a Twilio phone number
-fastify.post("/config/twilio-phone-numbers", async (request, reply) => {
-  const { phoneNumber } = request.body;
 
-  if (!phoneNumber) {
-    return reply.status(400).send({
-      error: "Phone number is required",
-    });
-  }
-
+// API to update client
+fastify.put("/clients/:clientId", async (request, reply) => {
   try {
-    // Verify the phone number belongs to the account
-    const numbers = await twilioClient.incomingPhoneNumbers.list({
-      phoneNumber,
-    });
+    const { clientId } = request.params;
+    const updateData = request.body;
 
-    if (numbers.length === 0) {
-      return reply.status(400).send({
-        error: "Phone number not found in your Twilio account",
+    // Prevent changing the clientId
+    if (updateData.clientId) {
+      delete updateData.clientId;
+    }
+
+    const updatedClient = await updateClient(clientId, updateData);
+
+    if (!updatedClient) {
+      return reply.code(404).send({
+        error: "Client not found",
       });
     }
 
-    // Add the phone number if it doesn't already exist
-    if (!configStore.TWILIO_PHONE_NUMBERS.includes(phoneNumber)) {
-      configStore.TWILIO_PHONE_NUMBERS.push(phoneNumber);
-    }
-
     reply.send({
-      success: true,
-      phoneNumbers: configStore.TWILIO_PHONE_NUMBERS,
+      message: "Client updated successfully",
+      client: updatedClient,
     });
   } catch (error) {
-    reply.status(500).send({
-      error: "Failed to add phone number",
+    console.error("Error updating client:", error);
+    reply.code(500).send({
+      error: "Failed to update client",
       details: error.message,
     });
   }
 });
-// API to remove a Twilio phone number
-fastify.delete(
-  "/config/twilio-phone-numbers/:phoneNumber",
-  async (request, reply) => {
-    const { phoneNumber } = request.params;
 
-    const index = configStore.TWILIO_PHONE_NUMBERS.indexOf(phoneNumber);
-    if (index > -1) {
-      configStore.TWILIO_PHONE_NUMBERS.splice(index, 1);
-      reply.send({
-        success: true,
-        phoneNumbers: configStore.TWILIO_PHONE_NUMBERS,
-      });
-    } else {
-      reply.status(404).send({
-        error: "Phone number not found",
+// API to delete client
+fastify.delete("/clients/:clientId", async (request, reply) => {
+  try {
+    const { clientId } = request.params;
+
+    const deleted = await deleteClient(clientId);
+
+    if (!deleted) {
+      return reply.code(404).send({
+        error: "Client not found",
       });
     }
-  }
-);
-// API to remove an ElevenLabs agent
-fastify.delete("/config/elevenlabs-agents/:agentId", async (request, reply) => {
-  const { agentId } = request.params;
 
-  const index = configStore.ELEVENLABS_AGENT_IDS.indexOf(agentId);
-  if (index > -1) {
-    configStore.ELEVENLABS_AGENT_IDS.splice(index, 1);
     reply.send({
-      success: true,
-      agentIds: configStore.ELEVENLABS_AGENT_IDS,
+      message: "Client deleted successfully",
     });
-  } else {
-    reply.status(404).send({
-      error: "Agent ID not found",
+  } catch (error) {
+    console.error("Error deleting client:", error);
+    reply.code(500).send({
+      error: "Failed to delete client",
+      details: error.message,
+    });
+  }
+});
+
+// API to add a call to client history
+fastify.post("/clients/:clientId/calls", async (request, reply) => {
+  try {
+    const { clientId } = request.params;
+    const callData = request.body;
+
+    // Basic validation
+    if (!callData.callData || !callData.callData.callSid) {
+      return reply.code(400).send({
+        error: "Missing required call information",
+        requiredFields: ["callData.callSid"],
+      });
+    }
+
+    const updatedClient = await addCallToHistory(clientId, callData);
+
+    if (!updatedClient) {
+      return reply.code(404).send({
+        error: "Client not found",
+      });
+    }
+
+    // Get the newly added call (should be the last one in the array)
+    const newCall =
+      updatedClient.callHistory[updatedClient.callHistory.length - 1];
+
+    reply.code(201).send({
+      message: "Call added to history",
+      callId: newCall.callId,
+      clientId: updatedClient.clientId,
+    });
+  } catch (error) {
+    console.error("Error adding call to history:", error);
+    reply.code(500).send({
+      error: "Failed to add call to history",
+      details: error.message,
+    });
+  }
+});
+
+// API to update call details
+fastify.put("/clients/:clientId/calls/:callId", async (request, reply) => {
+  try {
+    const { clientId, callId } = request.params;
+    const callDetails = request.body;
+
+    const updatedClient = await updateCallDetails(
+      clientId,
+      callId,
+      callDetails
+    );
+
+    if (!updatedClient) {
+      return reply.code(404).send({
+        error: "Client or call not found",
+      });
+    }
+
+    reply.send({
+      message: "Call details updated successfully",
+      clientId,
+      callId,
+    });
+  } catch (error) {
+    console.error("Error updating call details:", error);
+    reply.code(500).send({
+      error: "Failed to update call details",
+      details: error.message,
     });
   }
 });
@@ -550,27 +730,35 @@ fastify.register(async (fastifyInstance) => {
             try {
               // Create the config with proper format TODO test
 
-               // Extract dynamic variables from custom parameters
-               const dynamicVariables = {};
-              
-               // Add each parameter as a dynamic variable if it exists
-               if (customParameters?.full_name) dynamicVariables.full_name = customParameters.full_name;
-               if (customParameters?.business_name) dynamicVariables.business_name = customParameters.business_name;
-               if (customParameters?.city) dynamicVariables.city = customParameters.city;
-               if (customParameters?.job_title) dynamicVariables.job_title = customParameters.job_title;
-               if (customParameters?.email) dynamicVariables.email = customParameters.email;
-               if (customParameters?.phone) dynamicVariables.phone = customParameters.phone;
- 
-               // Create the initialization config with dynamic variables
-               const initialConfig = {
-                 type: "conversation_initiation_client_data",
-                 dynamic_variables: dynamicVariables,
-                 conversation_config_override: {
-                   agent: {
-                     first_message: customParameters?.first_message || "Hello, how can I help you today?",
-                   },
-                 },
-               };
+              // Extract dynamic variables from custom parameters
+              const dynamicVariables = {};
+
+              // Add each parameter as a dynamic variable if it exists
+              if (customParameters?.full_name)
+                dynamicVariables.full_name = customParameters.full_name;
+              if (customParameters?.business_name)
+                dynamicVariables.business_name = customParameters.business_name;
+              if (customParameters?.city)
+                dynamicVariables.city = customParameters.city;
+              if (customParameters?.job_title)
+                dynamicVariables.job_title = customParameters.job_title;
+              if (customParameters?.email)
+                dynamicVariables.email = customParameters.email;
+              if (customParameters?.phone)
+                dynamicVariables.phone = customParameters.phone;
+
+              // Create the initialization config with dynamic variables
+              const initialConfig = {
+                type: "conversation_initiation_client_data",
+                dynamic_variables: dynamicVariables,
+                conversation_config_override: {
+                  agent: {
+                    first_message:
+                      customParameters?.first_message ||
+                      "Hello, how can I help you today?",
+                  },
+                },
+              };
 
               console.log(
                 "[ElevenLabs] Sending initial config with dynamic variables:",
@@ -779,12 +967,14 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
 
 // Route to initiate an outbound call
 fastify.post("/make-outbound-call", async (request, reply) => {
-  const { full_name, business_name, city, job_title, email, phone, from } = request.body;
+  const { full_name, business_name, city, job_title, email, phone, from } =
+    request.body;
 
   const agentId = configStore.ELEVENLABS_AGENT_IDS[0];
   const phoneRegex = /^\+[1-9]\d{1,14}$/;
-  const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  
+  const requestId =
+    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
   console.log(`[${requestId}] Outbound call request received`);
 
   // Input validation
@@ -795,9 +985,11 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       requestId,
     });
   }
- 
+
   if (!phoneRegex.test(phone)) {
-    console.log(`[${requestId}] Error: Invalid destination phone format: ${phone}`);
+    console.log(
+      `[${requestId}] Error: Invalid destination phone format: ${phone}`
+    );
     return reply.status(400).send({
       error: "Phone number must be in E.164 format (e.g., +12125551234)",
       requestId,
@@ -807,18 +999,18 @@ fastify.post("/make-outbound-call", async (request, reply) => {
   try {
     // Select phone number to use (from query param or first configured number)
     const phoneNumber = from || configStore.TWILIO_PHONE_NUMBERS[0];
-    
+
     if (!phoneNumber) {
       throw new Error("No Twilio phone number available");
     }
 
     // Create first message (kept short for URL)
-    const firstName = full_name ? full_name.split(' ')[0] : '';
-    const first_message = `${firstName ? firstName : 'Hello'}?`;
+    const firstName = full_name ? full_name.split(" ")[0] : "";
+    const first_message = `${firstName ? firstName : "Hello"}?`;
 
     // Build the webhook URL with all dynamic variables
     let webhookUrl = `https://${request.headers.host}/outbound-call-twiml?`;
-    
+
     // Add parameters to the URL
     const params = {
       first_message,
@@ -828,19 +1020,21 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       job_title,
       email,
       phone,
-      requestId
+      requestId,
     };
-    
+
     // Convert parameters to URL query string
     const queryParams = [];
     for (const [key, value] of Object.entries(params)) {
       if (value) {
-        queryParams.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+        queryParams.push(
+          `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+        );
       }
     }
-    
-    webhookUrl += queryParams.join('&');
-    
+
+    webhookUrl += queryParams.join("&");
+
     console.log(`[${requestId}] Using webhook URL with dynamic variables`);
 
     // Create the call
@@ -853,7 +1047,9 @@ fastify.post("/make-outbound-call", async (request, reply) => {
       statusCallbackMethod: "POST",
     });
 
-    console.log(`[${requestId}] Outbound call initiated successfully: ${call.sid}`);
+    console.log(
+      `[${requestId}] Outbound call initiated successfully: ${call.sid}`
+    );
 
     // Track the call in our application
     const callData = {
@@ -870,8 +1066,8 @@ fastify.post("/make-outbound-call", async (request, reply) => {
         city,
         job_title,
         email,
-        phone
-      }
+        phone,
+      },
     };
 
     // Store call data
@@ -883,7 +1079,7 @@ fastify.post("/make-outbound-call", async (request, reply) => {
     reply.send({
       success: true,
       message: "Call initiated successfully",
-      callSid: call.sid
+      callSid: call.sid,
     });
   } catch (error) {
     // Detailed error handling based on the type of error
@@ -952,34 +1148,45 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     job_title,
     email,
     phone,
-    requestId
+    requestId,
   } = request.query;
 
-  console.log(`[${requestId || 'unknown'}] Generating TwiML with parameters:`, request.query);
+  console.log(
+    `[${requestId || "unknown"}] Generating TwiML with parameters:`,
+    request.query
+  );
 
   // Create the TwiML response that passes all variables to the WebSocket stream
   let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
       <Connect>
         <Stream url="wss://${request.headers.host}/outbound-media-stream">`;
-  
+
   // Add each parameter to the TwiML if it exists
-  if (first_message) twimlResponse += `\n          <Parameter name="first_message" value="${first_message}" />`;
-  if (full_name) twimlResponse += `\n          <Parameter name="full_name" value="${full_name}" />`;
-  if (business_name) twimlResponse += `\n          <Parameter name="business_name" value="${business_name}" />`;
-  if (city) twimlResponse += `\n          <Parameter name="city" value="${city}" />`;
-  if (job_title) twimlResponse += `\n          <Parameter name="job_title" value="${job_title}" />`;
-  if (email) twimlResponse += `\n          <Parameter name="email" value="${email}" />`;
-  if (phone) twimlResponse += `\n          <Parameter name="phone" value="${phone}" />`;
-  if (requestId) twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
-  
+  if (first_message)
+    twimlResponse += `\n          <Parameter name="first_message" value="${first_message}" />`;
+  if (full_name)
+    twimlResponse += `\n          <Parameter name="full_name" value="${full_name}" />`;
+  if (business_name)
+    twimlResponse += `\n          <Parameter name="business_name" value="${business_name}" />`;
+  if (city)
+    twimlResponse += `\n          <Parameter name="city" value="${city}" />`;
+  if (job_title)
+    twimlResponse += `\n          <Parameter name="job_title" value="${job_title}" />`;
+  if (email)
+    twimlResponse += `\n          <Parameter name="email" value="${email}" />`;
+  if (phone)
+    twimlResponse += `\n          <Parameter name="phone" value="${phone}" />`;
+  if (requestId)
+    twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
+
   // Close the TwiML tags
   twimlResponse += `
         </Stream>
       </Connect>
     </Response>`;
 
-  reply.type('text/xml').send(twimlResponse);
+  reply.type("text/xml").send(twimlResponse);
 });
 
 // New endpoint to serve personalized data for inbound calls TODO test
@@ -1484,10 +1691,15 @@ fastify.post("/call-status", async (request, reply) => {
 });
 
 // Start the Fastify server
-fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
-  if (err) {
-    console.error("Error starting server:", err);
+const start = async () => {
+  try {
+    await connectDB();
+    await fastify.listen({ port: process.env.PORT || 8000, host: "0.0.0.0" });
+    console.log(`Server listening on ${fastify.server.address().port}`);
+  } catch (err) {
+    fastify.log.error(err);
     process.exit(1);
   }
-  console.log(`[Server] Listening on port ${PORT} on all interfaces`);
-});
+};
+
+start();
