@@ -28,8 +28,6 @@ import {
   verifyClientToken,
 } from "./auth.js";
 
-import { authenticateClient, authenticateAdmin, verifyToken } from "./auth.js";
-
 // Import route modules
 import clientRoutes from "./routes/client.js";
 import adminRoutes from "./routes/admin.js";
