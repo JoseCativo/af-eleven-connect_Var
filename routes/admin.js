@@ -14,18 +14,41 @@ import {
  * These routes are prefixed with /admin in the main app
  */
 export default async function adminRoutes(fastify, options) {
-  // Get all clients
+  // Get client by ID (Admin)
+  fastify.get("/clients/:clientId", async (request, reply) => {
+    try {
+      const { clientId } = request.params;
+      const client = await findClientById(clientId);
+
+      if (!client) {
+        return reply.code(404).send({
+          error: "Client not found",
+        });
+      }
+
+      // Return the full client object including sensitive fields for admin users
+      // Previously this would have filtered out the clientSecret
+      reply.send(client);
+    } catch (error) {
+      fastify.log.error("Error fetching client:", error);
+      reply.code(500).send({
+        error: "Failed to fetch client",
+        details: error.message,
+      });
+    }
+  });
+
+  // Get all clients (Admin)
   fastify.get("/clients", async (request, reply) => {
     try {
       const { limit, offset, status, search } = request.query;
       let query = {};
 
-      // Filter by status if provided
+      // Apply filters if provided
       if (status) {
         query.status = status;
       }
 
-      // Search by client name, email, or business name
       if (search) {
         query.$or = [
           { "clientMeta.fullName": { $regex: search, $options: "i" } },
@@ -34,11 +57,9 @@ export default async function adminRoutes(fastify, options) {
         ];
       }
 
-      // Create a base query that excludes the clientSecret
-      let clientsQuery = Client.find(query).select("-clientSecret");
-
-      // Get total count for pagination
-      const totalCount = await Client.countDocuments(query);
+      // Create a base query that now includes all fields, including clientSecret
+      let clientsQuery = Client.find(query);
+      // Remove the .select("-clientSecret") if it exists
 
       // Apply pagination if requested
       if (offset || limit) {
@@ -47,11 +68,12 @@ export default async function adminRoutes(fastify, options) {
         clientsQuery = clientsQuery.skip(skip).limit(take);
       }
 
-      // Apply sorting - default to newest first
+      // Apply sorting
       clientsQuery = clientsQuery.sort({ createdAt: -1 });
 
       // Execute the query
       const clients = await clientsQuery;
+      const totalCount = await Client.countDocuments(query);
 
       reply.send({
         total: totalCount,
@@ -62,33 +84,6 @@ export default async function adminRoutes(fastify, options) {
       fastify.log.error("Error fetching clients:", error);
       reply.code(500).send({
         error: "Failed to fetch clients",
-        details: error.message,
-      });
-    }
-  });
-
-  // Get client by ID
-  fastify.get("/clients/:clientId", async (request, reply) => {
-    try {
-      const { clientId } = request.params;
-
-      const client = await findClientById(clientId);
-
-      if (!client) {
-        return reply.code(404).send({
-          error: "Client not found",
-        });
-      }
-
-      // Admin can see all client data except clientSecret
-      const clientData = client.toObject();
-      delete clientData.clientSecret;
-
-      reply.send(clientData);
-    } catch (error) {
-      fastify.log.error("Error fetching client:", error);
-      reply.code(500).send({
-        error: "Failed to fetch client",
         details: error.message,
       });
     }
@@ -152,13 +147,9 @@ export default async function adminRoutes(fastify, options) {
 
       const newClient = await createClient(clientData);
 
-      // Don't return the clientSecret in the response
-      const clientResponse = newClient.toObject();
-      delete clientResponse.clientSecret;
-
       reply.code(201).send({
         message: "Client created successfully",
-        client: clientResponse,
+        client: newClient,
       });
     } catch (error) {
       fastify.log.error("Error creating client:", error);
