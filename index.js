@@ -32,6 +32,7 @@ import {
 import clientRoutes from "./routes/client.js";
 import adminRoutes from "./routes/admin.js";
 import authRoutes from "./routes/auth.js";
+import integrationsRoutes from "./routes/integrations.js";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -90,6 +91,7 @@ fastify.register(adminRoutes, {
   prefix: "/admin",
   preHandler: authenticateAdmin,
 });
+fastify.register(integrationsRoutes, { prefix: "/integrations" });
 
 // Initialize Twilio client
 const twilioClient = new Twilio(

@@ -1,3 +1,8 @@
+Below is an updated version of your `Client Account Creation` documentation in Markdown format, incorporating a new section on **setting up a client access token**. I've included `curl` request examples and JSON responses consistent with your existing `af-eleven-connect` codebase, particularly the `auth.js` and `routes/auth.js` files, which handle client login and token generation.
+
+---
+
+````markdown
 # Client Account Creation
 
 ## Overview
@@ -50,6 +55,7 @@ curl -X POST https://api.v1.affinitydesign.ca/admin/clients \
     "status": "Active"
   }'
 ```
+````
 
 ### Request Field Descriptions
 
@@ -100,9 +106,97 @@ Upon successful creation, the system returns a response with the new client's de
 
 > **Important Security Note**: The response will include both the `clientId` and `clientSecret` in this API response, as they were provided in the request. For security purposes, the `clientSecret` will not be retrievable in subsequent API calls unless explicitly reset.
 
+## Setting Up a Client Access Token
+
+After creating a client account, the client needs a JWT access token to authenticate and use the secure `/secure/*` endpoints. This token is obtained by logging in with the `clientId` and `clientSecret`.
+
+### API Endpoint Details
+
+**Endpoint:** `POST /auth/login`  
+**Authentication:** None (uses `clientId` and `clientSecret`)  
+**Content-Type:** application/json
+
+### Request Format
+
+The client (or an admin on their behalf) can request a token using the following API call:
+
+```bash
+curl -X POST https://api.v1.affinitydesign.ca/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientId": "client_12345abcde",
+    "clientSecret": "client_secure_secret_key"
+  }'
+```
+
+### Request Field Descriptions
+
+- **clientId**: The unique identifier assigned to the client during creation
+- **clientSecret**: The secret key assigned to the client during creation
+
+### Response Format
+
+Upon successful login, the system returns a JWT token and client details:
+
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJZCI6ImNsaWVudF8xMjM0NWFiY2RlIiwidHlwZSI6ImNsaWVudCIsImlhdCI6MTcxMTAyMjQwMH0...",
+  "client": {
+    "clientId": "client_12345abcde",
+    "status": "Active",
+    "twilioPhoneNumber": "+18001234567",
+    "agentId": "agent_id_here",
+    "clientMeta": {
+      "fullName": "John Doe",
+      "businessName": "Acme Corp",
+      "email": "john@example.com"
+    }
+  }
+}
+```
+
+#### Response Fields
+
+- **success**: Indicates the login attempt was successful
+- **token**: The JWT access token to be used in the `Authorization` header for secure endpoints
+- **client**: Basic client information returned for confirmation
+
+### Using the Access Token
+
+The client must include the token in the `Authorization` header for all `/secure/*` endpoint requests. Example:
+
+```bash
+curl -X GET https://api.v1.affinitydesign.ca/secure/client \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJZCI6ImNsaWVudF8xMjM0NWFiY2RlIiwidHlwZSI6ImNsaWVudCIsImlhdCI6MTcxMTAyMjQwMH0..."
+```
+
+#### Error Responses
+
+- **Invalid Credentials**:
+
+  ```json
+  {
+    "error": "Invalid credentials or inactive client"
+  }
+  ```
+
+  **Status Code**: 401 Unauthorized
+
+- **Missing Fields**:
+  ```json
+  {
+    "error": "Missing required fields",
+    "requiredFields": ["clientId", "clientSecret"]
+  }
+  ```
+  **Status Code**: 400 Bad Request
+
+> **Security Note**: The access token does not expire by default. Clients should store it securely and treat it as sensitive, as it grants full access to their account until revoked or the `clientSecret` is changed.
+
 ## Retrieving the Client Secret
 
-If you need to view the client secret for initial setup, you must use the reset secret endpoint:
+If you need to view or regenerate the client secret (e.g., for initial setup or if lost), use the reset secret endpoint:
 
 ```bash
 curl -X POST https://api.v1.affinitydesign.ca/admin/clients/client_12345abcde/reset-secret \
@@ -121,13 +215,15 @@ Response:
 }
 ```
 
+> **Note**: After resetting the secret, the client must log in again with the new `clientSecret` to obtain a valid token, as the old token will no longer work.
+
 ## Next Steps After Creating a Client
 
-After creating a client account, you should:
+After creating a client account and setting up their access token, you should:
 
 1. Securely provide the client with their `clientId` and `clientSecret` for API authentication
-2. Guide the client through the login process to obtain their JWT token
-3. Ensure the client can access their secure endpoints
+2. Instruct the client to log in using `POST /auth/login` to obtain their JWT token
+3. Ensure the client can access their secure endpoints (e.g., `/secure/client`) with the token
 4. Set up any additional configurations specific to the client's needs
 
 ## Common Issues and Troubleshooting
@@ -164,6 +260,18 @@ If the Twilio phone number is incorrectly formatted or not provisioned in your T
 
 **Resolution**: Ensure the phone number is in E.164 format (+12125551234) and properly provisioned in your Twilio account.
 
+### Login Failure Due to Inactive Status
+
+If a client’s status is "Inactive" or "Suspended", login will fail:
+
+```json
+{
+  "error": "Invalid credentials or inactive client"
+}
+```
+
+**Resolution**: Ensure the client’s status is "Active" using the `/admin/clients/:clientId` endpoint to update it.
+
 ## Client Account Statuses
 
 A client account can have one of the following statuses:
@@ -171,3 +279,18 @@ A client account can have one of the following statuses:
 - **Active**: The client can authenticate and use all client-specific endpoints
 - **Inactive**: The client cannot authenticate (typically used for clients no longer using the service)
 - **Suspended**: The client cannot authenticate (typically used for temporary suspension due to billing or other issues)
+
+```
+
+---
+
+### Changes Made
+1. **New Section**: Added "Setting Up a Client Access Token" after the client creation process, detailing the `/auth/login` endpoint.
+2. **Request Example**: Included a `curl` command for `POST /auth/login` with `clientId` and `clientSecret`.
+3. **Response Details**: Provided a sample JSON success response with a token, plus error cases (invalid credentials, missing fields).
+4. **Usage Guidance**: Explained how to use the token in subsequent requests and noted its non-expiring nature.
+5. **Troubleshooting**: Added a note about login failures due to inactive status.
+6. **Next Steps**: Updated to include obtaining the JWT token as a step.
+
+This aligns with your app’s `auth.js` logic (e.g., `handleClientLogin`) and ensures clients can authenticate post-creation. Let me know if you need further adjustments!
+```

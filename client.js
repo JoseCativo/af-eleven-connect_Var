@@ -76,7 +76,10 @@ const clientSchema = new mongoose.Schema(
       unique: true,
       index: true, // Creates an index for faster lookups
     },
+    calId: { type: String, required: true },
     clientSecret: { type: String, required: true },
+    refreshToken: { type: String, required: true }, // GHL refresh token
+    tokenExpiresAt: { type: Date }, // When the access token expires
     agentId: { type: String, required: true },
     twilioPhoneNumber: { type: String, required: true },
     status: {
@@ -108,8 +111,11 @@ export default Client;
 /*
 {
   "_id": "6450a47c9c4a7e001d123456",
-  "clientId": "5C3JSOVVFimBoh8mv3I",
+  "clientId": "5C3JSOVVFiVmBoh8mv3I",
   "clientSecret": "5C3JSBoh8mv3IOVVFim",
+  "refreshToken": "5C3JSOVVFiVmBoh8mv3I",
+  "tokenExpiresAt": "2025-03-19T10:00:00.000Z",
+  "calId": "e0JBV5PARC9sbebxcYnY",
   "agentId": "qvu7240QhEUKLultBI7i",
   "twilioPhoneNumber": "+18632704910",
   "status": "Active",
