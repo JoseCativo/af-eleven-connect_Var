@@ -23,7 +23,7 @@ async function integrationsRoutes(fastify, options) {
     try {
       // Exchange the authorization code for tokens
       const tokenResponse = await fetch(
-        "https://services.gohighlevel.com/oauth/token",
+        "https://services.leadconnectorhq.com/oauth/token",
         {
           method: "POST",
           headers: {
