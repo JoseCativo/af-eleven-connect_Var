@@ -103,7 +103,7 @@ async function integrationsRoutes(fastify, options) {
     }
 
     const authUrl = new URL(
-      "https://marketplace.gohighlevel.com/oauth/chooselocation"
+      "https://marketplace.leadconnectorhq.com/oauth/chooselocation"
     );
     authUrl.searchParams.append("response_type", "code");
     authUrl.searchParams.append("client_id", process.env.GHL_CLIENT_ID);
