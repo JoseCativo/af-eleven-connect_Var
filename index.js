@@ -331,8 +331,9 @@ fastify.register(async (fastifyInstance) => {
       const setupElevenLabs = async () => {
         try {
           // Use the agent ID from parameters or default
-          const agentId =
-            customParameters?.agentId || configStore.ELEVENLABS_AGENT_IDS[0];
+
+          const agentId = customParameters?.agentId;
+          console.log("[ElevenLabs] AGENT ID:", agentId);
 
           if (!agentId) {
             throw new Error("No agent ID available");
@@ -635,7 +636,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     twimlResponse += `\n          <Parameter name="phone" value="${phone}" />`;
   if (requestId)
     twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
-  if (requestId)
+  if (agentId)
     twimlResponse += `\n          <Parameter name="agentId" value="${agentId}" />`;
 
   // Close the TwiML tags
