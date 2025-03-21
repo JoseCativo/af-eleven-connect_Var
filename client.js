@@ -101,6 +101,7 @@ clientSchema.index({ "clientMeta.phone": 1 });
 clientSchema.index({ "clientMeta.email": 1 });
 clientSchema.index({ agentId: 1 });
 clientSchema.index({ "callHistory.callData.callSid": 1 });
+clientSchema.index({ twilioPhoneNumber: 1 });
 
 // Compiling the schema into a model
 const Client = mongoose.model("Client", clientSchema);

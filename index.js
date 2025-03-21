@@ -722,178 +722,6 @@ fastify.all("/incoming-call-eleven", async (request, reply) => {
   reply.type("text/xml").send(twimlResponse);
 });
 
-// Route to initiate an outbound call
-fastify.post("/make-outbound-call", async (request, reply) => {
-  const { full_name, business_name, city, job_title, email, phone, from } =
-    request.body;
-
-  const agentId = configStore.ELEVENLABS_AGENT_IDS[0];
-  const phoneRegex = /^\+[1-9]\d{1,14}$/;
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
-  console.log(`[${requestId}] Outbound call request received`);
-
-  // Input validation
-  if (!phone) {
-    console.log(`[${requestId}] Error: Destination phone number missing`);
-    return reply.status(400).send({
-      error: "Destination phone number is required",
-      requestId,
-    });
-  }
-
-  if (!phoneRegex.test(phone)) {
-    console.log(
-      `[${requestId}] Error: Invalid destination phone format: ${phone}`
-    );
-    return reply.status(400).send({
-      error: "Phone number must be in E.164 format (e.g., +12125551234)",
-      requestId,
-    });
-  }
-
-  try {
-    // Select phone number to use (from query param or first configured number)
-    const phoneNumber = from || configStore.TWILIO_PHONE_NUMBERS[0];
-
-    if (!phoneNumber) {
-      throw new Error("No Twilio phone number available");
-    }
-
-    // Create first message (kept short for URL)
-    const firstName = full_name ? full_name.split(" ")[0] : "";
-    const first_message = `${firstName ? firstName : "Hello"}?`;
-
-    // Build the webhook URL with all dynamic variables
-    let webhookUrl = `https://${request.headers.host}/outbound-call-twiml?`;
-
-    // Add parameters to the URL
-    const params = {
-      first_message,
-      full_name,
-      business_name,
-      city,
-      job_title,
-      email,
-      phone,
-      requestId,
-    };
-
-    // Convert parameters to URL query string
-    const queryParams = [];
-    for (const [key, value] of Object.entries(params)) {
-      if (value) {
-        queryParams.push(
-          `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
-        );
-      }
-    }
-
-    webhookUrl += queryParams.join("&");
-
-    console.log(`[${requestId}] Using webhook URL with dynamic variables`);
-
-    // Create the call
-    const call = await twilioClient.calls.create({
-      url: webhookUrl,
-      to: phone,
-      from: phoneNumber,
-      statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}`,
-      statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
-      statusCallbackMethod: "POST",
-    });
-
-    console.log(
-      `[${requestId}] Outbound call initiated successfully: ${call.sid}`
-    );
-
-    // Track the call in our application
-    const callData = {
-      callSid: call.sid,
-      requestId,
-      phone,
-      from: phoneNumber,
-      agentId,
-      startTime: new Date(),
-      status: "initiated",
-      metadata: {
-        full_name,
-        business_name,
-        city,
-        job_title,
-        email,
-        phone,
-      },
-    };
-
-    // Store call data
-    if (!configStore.callHistory) {
-      configStore.callHistory = new Map();
-    }
-    configStore.callHistory.set(call.sid, callData);
-
-    reply.send({
-      success: true,
-      message: "Call initiated successfully",
-      callSid: call.sid,
-    });
-  } catch (error) {
-    // Detailed error handling based on the type of error
-    console.error(`[${requestId}] Error initiating call:`, error);
-
-    let statusCode = 500;
-    let errorMessage = "Failed to initiate call";
-    let errorDetails = error.message;
-    let resolution = null;
-
-    // Handle specific Twilio error codes
-    if (error.code) {
-      switch (error.code) {
-        case 21211:
-          statusCode = 400;
-          errorMessage = "Invalid 'To' phone number";
-          resolution = "Check the phone number format and try again";
-          break;
-        case 21214:
-          statusCode = 400;
-          errorMessage = "Invalid 'From' phone number";
-          resolution =
-            "Verify the Twilio phone number is active and properly configured";
-          break;
-        case 20404:
-          statusCode = 404;
-          errorMessage = "Twilio account not found or unauthorized";
-          resolution = "Check your Twilio account credentials";
-          break;
-        case 20003:
-          statusCode = 403;
-          errorMessage = "Permission denied";
-          resolution =
-            "Verify that your Twilio account has voice capabilities enabled";
-          break;
-        case 13223:
-          statusCode = 402;
-          errorMessage = "Insufficient funds";
-          resolution = "Add funds to your Twilio account";
-          break;
-        case 13224:
-          statusCode = 429;
-          errorMessage = "Rate limit exceeded";
-          resolution = "Try again after some time";
-          break;
-      }
-    }
-
-    reply.status(statusCode).send({
-      error: errorMessage,
-      details: errorDetails,
-      resolution,
-      requestId,
-    });
-  }
-});
-
 // Route to handle outbound calls from Twilio
 fastify.all("/outbound-call-twiml", async (request, reply) => {
   // Extract all query parameters for dynamic variables
@@ -946,313 +774,125 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
   reply.type("text/xml").send(twimlResponse);
 });
 
-// Secure endpoint for personalizing inbound call experiences TODO test
-fastify.post("/get-info", async (request, reply) => {
-  const { caller_id, called_number, agent_id, call_sid } = request.body;
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+// Secure endpoint for looking up customer ghl database, personalizing inbound call experiences TODO test
+fastify.post(
+  "/get-info",
+  {
+    preHandler: authenticateClient, // Add authentication requirement
+  },
+  async (request, reply) => {
+    const { caller_id, called_number, agent_id, call_sid } = request.body;
+    const requestId =
+      Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
-  console.log(
-    `[${requestId}] Processing inbound call personalization request:`,
-    { caller_id, called_number }
-  );
+    console.log(
+      `[${requestId}] Processing inbound call personalization request:`,
+      { caller_id, called_number }
+    );
 
-  // Validate required parameters
-  if (!caller_id || !called_number) {
-    console.log(`[${requestId}] Missing required parameters`);
-    return reply.code(400).send({
-      error: "Missing required parameters",
-      requiredParams: ["caller_id", "called_number"],
-    });
-  }
-
-  try {
-    // Find client by matching the called number with twilioPhoneNumber in our database
-    const client = await Client.findOne({ twilioPhoneNumber: called_number });
-
-    if (!client) {
-      console.log(
-        `[${requestId}] No client found for called number: ${called_number}`
-      );
-      return reply.send({
-        conversation_config_override: {
-          agent: {
-            first_message: "Hello!",
-          },
-        },
+    // Validate required parameters
+    if (!caller_id || !called_number) {
+      console.log(`[${requestId}] Missing required parameters`);
+      return reply.code(400).send({
+        error: "Missing required parameters",
+        requiredParams: ["caller_id", "called_number"],
       });
     }
 
-    console.log(
-      `[${requestId}] Found client: ${client.clientId}, checking for GHL integration`
-    );
+    try {
+      // Find client by matching the called number with twilioPhoneNumber in our database
+      const client = await Client.findOne({ twilioPhoneNumber: called_number });
 
-    // Check if client has GHL integration (accessToken)
-    if (!client.accessToken) {
-      console.log(`[${requestId}] Client has no GHL access token`);
-      return reply.send({
-        conversation_config_override: {
-          agent: {
-            first_message: "Hello!",
+      if (!client) {
+        console.log(
+          `[${requestId}] No client found for called number: ${called_number}`
+        );
+        return reply.send({
+          conversation_config_override: {
+            agent: {
+              first_message: "Hello!",
+            },
           },
-        },
-      });
-    }
+        });
+      }
 
-    // Search for the caller in GHL using the client's access token
-    const contact = await searchGhlContactByPhone(
-      client.accessToken,
-      caller_id
-    );
-
-    // If no contact found in GHL, return default greeting
-    if (!contact) {
       console.log(
-        `[${requestId}] No contact found in GHL for caller: ${caller_id}`
+        `[${requestId}] Found client: ${client.clientId}, checking for GHL integration`
       );
-      return reply.send({
-        conversation_config_override: {
-          agent: {
-            first_message: "Hello!",
+
+      // Check if client has GHL integration (accessToken)
+      if (!client.accessToken) {
+        console.log(`[${requestId}] Client has no GHL access token`);
+        return reply.send({
+          conversation_config_override: {
+            agent: {
+              first_message: "Hello!",
+            },
           },
-        },
-      });
-    }
+        });
+      }
 
-    // Map GHL contact data to dynamic variables
-    const dynamic_variables = {
-      customer_name:
-        `${contact.firstName || ""} ${contact.lastName || ""}`.trim() ||
-        "Customer",
-      email: contact.email || "",
-      company: contact.companyName || "",
-      jobTitle: contact.title || "",
-      city: contact.city || "",
-    };
-
-    console.log(
-      `[${requestId}] Successfully retrieved contact information from GHL`
-    );
-
-    // Return personalized response with dynamic variables
-    return reply.send({
-      dynamic_variables,
-      conversation_config_override: {
-        agent: {
-          first_message: `Hi ${
-            dynamic_variables.customer_name.split(" ")[0] || "there"
-          }!`,
-        },
-      },
-    });
-  } catch (error) {
-    console.error(`[${requestId}] Error personalizing call:`, error);
-
-    // Return default response on error
-    return reply.send({
-      conversation_config_override: {
-        agent: {
-          first_message: "Hello!",
-        },
-      },
-    });
-  }
-});
-
-fastify.post("/get-ghl-info", async (request, reply) => {
-  // Generate a request ID for tracking
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
-  // Extract parameters from request body
-  const { email, phone } = request.body;
-
-  // Extract API key from authorization header
-  const apiKey = request.headers.authorization?.replace("Bearer ", "");
-
-  // Validate required parameters - we need either email or phone
-  if (!email && !phone) {
-    console.log(`[${requestId}] Error: Missing search parameters`);
-    return reply.status(400).send({
-      error: "Either email, phone, or caller_id parameter is required",
-      requestId,
-    });
-  }
-
-  if (!apiKey) {
-    console.log(`[${requestId}] Error: Missing authorization header`);
-    return reply.status(401).send({
-      error: "Authorization header with Bearer token is required",
-      requestId,
-    });
-  }
-
-  // Determine which parameter to use for searching
-  let searchParam = {};
-  let searchValue = "";
-
-  if (email) {
-    searchParam = { email };
-    searchValue = email;
-  } else if (phone) {
-    searchParam = { phone };
-    searchValue = phone;
-  }
-
-  try {
-    console.log(
-      `[${requestId}] Querying Go High Level for contact info: ${searchValue}`
-    );
-
-    // API endpoint for searching contacts
-    const endpoint = "https://services.leadconnectorhq.com/contacts/search";
-
-    // Make the HTTP request to search for the contact
-    const searchResponse = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Version: "2021-07-28",
-      },
-      body: JSON.stringify({
-        ...searchParam,
-        limit: 1, // We only need the first matching contact
-      }),
-    });
-
-    if (!searchResponse.ok) {
-      const errorText = await searchResponse.text();
-      throw new Error(
-        `HTTP error! Status: ${searchResponse.status}, Details: ${errorText}`
-      );
-    }
-
-    const searchResult = await searchResponse.json();
-
-    // Check if we found any matching contacts
-    if (!searchResult.contacts || searchResult.contacts.length === 0) {
-      console.log(
-        `[${requestId}] No contact found with search param: ${searchValue}`
+      // Search for the caller in GHL using the client's access token
+      const contact = await searchGhlContactByPhone(
+        client.accessToken,
+        caller_id
       );
 
-      // Return default data since we couldn't find a match
-      const defaultResponse = {
-        dynamic_variables: {
-          user_name: "Customer",
-          email: email || "",
-          phone: phone || caller_id || "",
-          company: "",
-          first_name: "",
-          last_name: "",
-        },
-        conversation_config_override: {
-          agent: {
-            first_message:
-              "Hello! Thanks for taking my call today. How are you doing?",
+      // If no contact found in GHL, return default greeting
+      if (!contact) {
+        console.log(
+          `[${requestId}] No contact found in GHL for caller: ${caller_id}`
+        );
+        return reply.send({
+          conversation_config_override: {
+            agent: {
+              first_message: "Hello!",
+            },
           },
-        },
+        });
+      }
+
+      // Map GHL contact data to dynamic variables
+      const dynamic_variables = {
+        customer_name:
+          `${contact.firstName || ""} ${contact.lastName || ""}`.trim() ||
+          "Customer",
+        email: contact.email || "",
+        company: contact.companyName || "",
+        jobTitle: contact.title || "",
+        city: contact.city || "",
       };
 
-      return reply.send(defaultResponse);
+      console.log(
+        `[${requestId}] Successfully retrieved contact information from GHL`
+      );
+
+      // Return personalized response with dynamic variables
+      return reply.send({
+        dynamic_variables,
+        conversation_config_override: {
+          agent: {
+            first_message: `Hey ${
+              dynamic_variables.customer_name.split(" ")[0] +
+                " how is it going?" || "there"
+            }!`,
+          },
+        },
+      });
+    } catch (error) {
+      console.error(`[${requestId}] Error personalizing call:`, error);
+
+      // Return default response on error
+      return reply.send({
+        conversation_config_override: {
+          agent: {
+            first_message: "Hello!",
+          },
+        },
+      });
     }
-
-    // Get the first matching contact
-    const contact = searchResult.contacts[0];
-
-    console.log(
-      `[${requestId}] Found contact: ${contact.firstName} ${contact.lastName}`
-    );
-
-    // Map Go High Level contact fields to our dynamic variables
-    const dynamic_variables = {
-      // Name fields - we need to ensure user_name is properly set
-      user_name: `${contact.firstName || ""} ${contact.lastName || ""}`.trim(),
-      first_name: contact.firstName || "",
-      last_name: contact.lastName || "",
-
-      // Contact information
-      email: contact.email || email || "",
-      phone: contact.phone || phone || "",
-
-      // Company information
-      company: contact.companyName || "",
-      website: contact.website || "",
-
-      // Address information
-      address: contact.address1 || "",
-      city: contact.city || "",
-      state: contact.state || "",
-      postal_code: contact.postalCode || "",
-      country: contact.country || "",
-
-      // Additional fields
-      tags: contact.tags || [],
-      customFields: contact.customFields || {},
-    };
-
-    // Create a personalized first message based on the contact's name
-    const firstName = contact.firstName || "there";
-    const firstMessage = `Hi ${firstName}, this is Alex from Affinity Design. How are you doing today?`;
-
-    // Create a personalized prompt with context about the customer
-    const promptBase = `You are speaking with ${dynamic_variables.user_name}`;
-    const companyContext = dynamic_variables.company
-      ? ` who works at ${dynamic_variables.company}`
-      : "";
-    const locationContext = dynamic_variables.city
-      ? ` based in ${dynamic_variables.city}${
-          dynamic_variables.state ? ", " + dynamic_variables.state : ""
-        }`
-      : "";
-    const promptSuffix = `. Be friendly, professional, and conversational. Address the customer by their first name (${firstName}) when appropriate.`;
-
-    const prompt = promptBase + companyContext + locationContext + promptSuffix;
-
-    // const response = {
-    //   dynamic_variables: dynamic_variables,
-    //   conversation_config_override: {
-    //     agent: {
-    //       first_message: firstMessage,
-    //     }
-    //   }
-    // };
-
-    // Prepare the response object
-    const response = {
-      dynamic_variables: dynamic_variables,
-    };
-
-    // Log the response for debugging (limited to avoid exposing sensitive information)
-    console.log(
-      `[${requestId}] Returning Go High Level contact data for ${dynamic_variables.user_name}`
-    );
-
-    reply.send(response);
-  } catch (error) {
-    console.error(
-      `[${requestId}] Error fetching contact from Go High Level:`,
-      error
-    );
-
-    // Return a default response even if there was an error
-    const defaultResponse = {
-      dynamic_variables: {
-        user_name: "Customer",
-        email: email || "",
-        phone: phone || "",
-        company: "",
-        first_name: "",
-        last_name: "",
-      },
-    };
-
-    // Log the error but still return a valid response to prevent call failures
-    console.log(`[${requestId}] Returning default values due to error`);
-    reply.send(defaultResponse);
   }
-});
+);
 
 // Route to get a representative's availability
 fastify.get("/get-availability", async (request, reply) => {
