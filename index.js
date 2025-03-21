@@ -1271,7 +1271,7 @@ fastify.post(
       city,
       job_title,
       email,
-    } = request.params;
+    } = request.query;
 
     // Generate a request ID for tracking
     const requestId =
@@ -1332,13 +1332,13 @@ fastify.post(
 
       // Add parameters to the URL
       const params = {
-        first_message: decodeURIComponent(first_message),
+        first_message: `${decodeURIComponent(first_message)}`,
         agentId: client.agentId,
-        full_name: decodeURIComponent(f_name) + decodeURIComponent(l_name),
-        business_name: decodeURIComponent(business_name),
-        city: decodeURIComponent(city),
-        job_title: decodeURIComponent(job_title),
-        email: decodeURIComponent(email),
+        full_name: `${decodeURIComponent(f_name) + decodeURIComponent(l_name)}`,
+        business_name: `${decodeURIComponent(business_name)}`,
+        city: `${decodeURIComponent(city)}`,
+        job_title: `${decodeURIComponent(job_title)}`,
+        email: `${decodeURIComponent(email)}`,
         phone,
         requestId,
       };
