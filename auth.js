@@ -92,38 +92,31 @@ export async function authenticateClient(request, reply) {
 
 // Middleware to authenticate admin requests
 export async function authenticateAdmin(request, reply) {
-  const authHeader = request.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  try {
+    const authHeader = request.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      // Critical fix: This tells Fastify to stop processing the request
+      throw new Error("Authentication failed");
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = verifyToken(token);
+
+    if (decoded.type !== "admin") {
+      request.adminId = decoded.adminId;
+      return;
+    }
+
+    // No return value needed in success case
+
+    throw new Error("Invalid token");
+  } catch (error) {
     reply.code(401).send({
       error: "Unauthorized",
-      message: "No token provided",
+      message: error.message,
     });
-    // Critical fix: This tells Fastify to stop processing the request
-    throw new Error("Authentication failed");
+    return reply.code(401);
   }
-
-  const token = authHeader.split(" ")[1];
-  const decoded = verifyToken(token);
-
-  if (!decoded) {
-    reply.code(401).send({
-      error: "Unauthorized",
-      message: "Invalid token",
-    });
-    throw new Error("Authentication failed");
-  }
-
-  if (decoded.type !== "admin") {
-    reply.code(401).send({
-      error: "Unauthorized",
-      message: "Insufficient permissions",
-    });
-    throw new Error("Authentication failed");
-  }
-
-  // Set admin info
-  request.adminId = decoded.adminId;
-  // No return value needed in success case
 }
 // Login endpoint handler
 export async function handleClientLogin(clientId, clientSecret) {
