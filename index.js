@@ -1332,13 +1332,13 @@ fastify.post(
 
       // Add parameters to the URL
       const params = {
-        first_message: first_message,
+        first_message: decodeURIComponent(first_message),
         agentId: client.agentId,
-        full_name: f_name + l_name,
-        business_name: business_name,
-        city: city,
-        job_title: job_title,
-        email: email,
+        full_name: decodeURIComponent(f_name) + decodeURIComponent(l_name),
+        business_name: decodeURIComponent(business_name),
+        city: decodeURIComponent(city),
+        job_title: decodeURIComponent(job_title),
+        email: decodeURIComponent(email),
         phone,
         requestId,
       };
