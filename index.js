@@ -821,7 +821,7 @@ fastify.post(
       );
 
       // Check if client has GHL integration (accessToken)
-      if (!client.accessToken) {
+      if (!client.refreshToken) {
         console.log(`[${requestId}] Client has no GHL access token`);
         return reply.send({
           conversation_config_override: {
@@ -832,31 +832,37 @@ fastify.post(
         });
       }
 
-      // Search for the caller in GHL using the client's access token
-      const contact = await searchGhlContactByPhone(
-        client.accessToken,
-        caller_id
-      );
+      // Check if client has GHL integration
+      if (client.refreshToken) {
+        // Use the new checkAndRefreshToken function to get a valid token
+        const { accessToken } = await checkAndRefreshToken(client.clientId);
 
-      // If no contact found in GHL, return default greeting
-      if (!contact) {
-        console.log(
-          `[${requestId}] No contact found in GHL for caller: ${caller_id}`
+        // Then search for the contact
+        const contact = await searchGhlContactByPhone(
+          accessToken,
+          caller_id,
+          client.clientId
         );
-        return reply.send({
-          conversation_config_override: {
-            agent: {
-              first_message: "Hello!",
+
+        // If no contact found in GHL, return default greeting
+        if (!contact) {
+          console.log(
+            `[${requestId}] No contact found in GHL for caller: ${caller_id}`
+          );
+          return reply.send({
+            conversation_config_override: {
+              agent: {
+                first_message: "Hello!",
+              },
             },
-          },
-        });
+          });
+        }
       }
 
       // Map GHL contact data to dynamic variables
       const dynamic_variables = {
         customer_name:
-          `${contact.firstName || ""} ${contact.lastName || ""}`.trim() ||
-          "Customer",
+          `${contact.firstName || ""} ${contact.lastName || ""}`.trim() || "",
         email: contact.email || "",
         company: contact.companyName || "",
         jobTitle: contact.title || "",
