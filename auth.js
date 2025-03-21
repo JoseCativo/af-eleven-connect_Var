@@ -51,7 +51,7 @@ export function verifyToken(token) {
 }
 
 // Middleware to authenticate client requests
-export function authenticateClient(request, reply) {
+export async function authenticateClient(request, reply) {
   try {
     // Extract token from Authorization header
     const authHeader = request.headers.authorization;
@@ -65,32 +65,28 @@ export function authenticateClient(request, reply) {
     const decoded = verifyToken(token);
     if (decoded && decoded.type === "client") {
       request.clientId = decoded.clientId;
-      return true;
+      return;
     }
 
     // If JWT verification fails, check if it matches a stored token
-    Client.findOne({ clientToken: token, status: "Active" })
-      .then((client) => {
-        if (client) {
-          request.clientId = client.clientId;
-          return true;
-        }
+    const client = await Client.findOne({
+      clientToken: token,
+      status: "Active",
+    });
 
-        throw new Error("Invalid token");
-      })
-      .catch((error) => {
-        reply.code(401).send({
-          error: "Unauthorized",
-          message: error.message,
-        });
-        return false;
-      });
+    if (client) {
+      request.clientId = client.clientId;
+      return;
+    }
+
+    // If we get here, authentication has failed
+    throw new Error("Invalid token");
   } catch (error) {
     reply.code(401).send({
       error: "Unauthorized",
       message: error.message,
     });
-    return false;
+    return reply.code(401);
   }
 }
 
