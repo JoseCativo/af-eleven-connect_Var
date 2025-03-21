@@ -36,6 +36,34 @@ function generateUniqueId() {
  * These routes are prefixed with /admin in the main app
  */
 export default async function adminRoutes(fastify, options) {
+  fastify.addHook("preHandler", async (request, reply) => {
+    try {
+      const authHeader = request.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Error("No token provided");
+      }
+
+      const token = authHeader.split(" ")[1];
+      const decoded = verifyToken(token);
+
+      if (!decoded) {
+        throw new Error("Invalid token");
+      }
+
+      if (decoded.type !== "admin") {
+        throw new Error("Insufficient permissions");
+      }
+
+      // Set admin info
+      request.adminId = decoded.adminId;
+    } catch (error) {
+      reply.code(401).send({
+        error: "Unauthorized",
+        message: error.message,
+      });
+      throw error; // This ensures Fastify doesn't proceed to the route handler
+    }
+  });
   // Get client by ID (Admin)
   fastify.get("/clients/:clientId", async (request, reply) => {
     try {
