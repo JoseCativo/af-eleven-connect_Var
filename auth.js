@@ -61,19 +61,30 @@ export function authenticateClient(request, reply) {
 
     const token = authHeader.split(" ")[1];
 
-    // Verify the token
+    // First try to verify token as JWT
     const decoded = verifyToken(token);
-    if (!decoded) {
-      throw new Error("Invalid token");
+    if (decoded && decoded.type === "client") {
+      request.clientId = decoded.clientId;
+      return true;
     }
 
-    // Check if it's a client token
-    if (decoded.type !== "client") {
-      throw new Error("Invalid token type");
-    }
+    // If JWT verification fails, check if it matches a stored token
+    Client.findOne({ clientToken: token, status: "Active" })
+      .then((client) => {
+        if (client) {
+          request.clientId = client.clientId;
+          return true;
+        }
 
-    // Add client info to request
-    request.clientId = decoded.clientId;
+        throw new Error("Invalid token");
+      })
+      .catch((error) => {
+        reply.code(401).send({
+          error: "Unauthorized",
+          message: error.message,
+        });
+        return false;
+      });
   } catch (error) {
     reply.code(401).send({
       error: "Unauthorized",
@@ -81,8 +92,6 @@ export function authenticateClient(request, reply) {
     });
     return false;
   }
-
-  return true;
 }
 
 // Middleware to authenticate admin requests
@@ -123,7 +132,6 @@ export function authenticateAdmin(request, reply) {
 // Login endpoint handler
 export async function handleClientLogin(clientId, clientSecret) {
   try {
-    // Find the client in the database
     const client = await Client.findOne({
       clientId,
       clientSecret,
@@ -137,8 +145,16 @@ export async function handleClientLogin(clientId, clientSecret) {
       };
     }
 
-    // Generate a token
-    const token = generateToken(clientId);
+    // Use existing token or generate a new one if it doesn't exist
+    let token = client.clientToken;
+    if (!token) {
+      token = generateToken(clientId);
+      // Store the token for future use
+      await Client.findOneAndUpdate(
+        { clientId },
+        { $set: { clientToken: token } }
+      );
+    }
 
     return {
       success: true,
@@ -165,14 +181,30 @@ export async function handleClientLogin(clientId, clientSecret) {
 }
 
 // Check if a client token is valid
+// In auth.js, modify verifyClientToken
 export async function verifyClientToken(token) {
   try {
+    // First try the standard JWT verification
     const decoded = verifyToken(token);
 
     if (!decoded || decoded.type !== "client") {
+      // If standard verification fails, check if it matches a stored token
+      const client = await Client.findOne({
+        clientToken: token,
+        status: "Active",
+      });
+
+      if (!client) {
+        return {
+          valid: false,
+          error: "Invalid token",
+        };
+      }
+
       return {
-        valid: false,
-        error: "Invalid token",
+        valid: true,
+        clientId: client.clientId,
+        directMatch: true,
       };
     }
 
@@ -192,7 +224,7 @@ export async function verifyClientToken(token) {
     return {
       valid: true,
       clientId: decoded.clientId,
-      expiresAt: new Date(decoded.exp * 1000),
+      expiresAt: decoded.exp ? new Date(decoded.exp * 1000) : null,
     };
   } catch (error) {
     console.error("Error verifying token:", error);

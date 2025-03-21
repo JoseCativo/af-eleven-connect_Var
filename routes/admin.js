@@ -146,6 +146,8 @@ export default async function adminRoutes(fastify, options) {
         clientData.clientSecret = generateUniqueId() + generateUniqueId();
       }
 
+      const clientToken = generateToken(clientData.clientId);
+      clientData.clientToken = clientToken;
       // Set status to Active by default
       clientData.status = clientData.status || "Active";
 
@@ -237,6 +239,7 @@ export default async function adminRoutes(fastify, options) {
   });
 
   // Reset client secret
+  // In admin.js, modify the reset client secret endpoint
   fastify.post("/clients/:clientId/reset-secret", async (request, reply) => {
     try {
       const { clientId } = request.params;
@@ -244,8 +247,14 @@ export default async function adminRoutes(fastify, options) {
       // Generate a new client secret
       const clientSecret = generateUniqueId() + generateUniqueId();
 
-      // Update the client with the new secret
-      const updatedClient = await updateClient(clientId, { clientSecret });
+      // Generate a new token as well
+      const clientToken = generateToken(clientId);
+
+      // Update the client with both new secret and token
+      const updatedClient = await updateClient(clientId, {
+        clientSecret,
+        clientToken,
+      });
 
       if (!updatedClient) {
         return reply.code(404).send({
@@ -258,14 +267,11 @@ export default async function adminRoutes(fastify, options) {
         client: {
           clientId: updatedClient.clientId,
           clientSecret,
+          clientToken,
         },
       });
     } catch (error) {
-      fastify.log.error("Error resetting client secret:", error);
-      reply.code(500).send({
-        error: "Failed to reset client secret",
-        details: error.message,
-      });
+      // ... error handling ...
     }
   });
 

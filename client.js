@@ -77,7 +77,8 @@ const clientSchema = new mongoose.Schema(
       index: true, // Creates an index for faster lookups
     },
     calId: { type: String, required: true },
-    clientSecret: { type: String },
+    clientToken: { type: String }, // Internal client token used as bearer token for all client restricted access points
+    clientSecret: { type: String }, // Internal client secret used to verify/generate jwt client token
     accessToken: { type: String }, // GHL access token (separate from clientSecret)
     refreshToken: { type: String }, // GHL refresh token
     tokenExpiresAt: { type: Date }, // When the access token expires
