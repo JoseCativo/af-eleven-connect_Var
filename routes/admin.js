@@ -8,7 +8,7 @@ import {
   findClientsWithRecentCalls,
   findClientsByAgentAndOutcome,
 } from "../crud.js";
-
+import { checkAndRefreshToken, refreshGhlToken } from "../utils/ghl.js";
 /**
  * Admin routes - all require admin authentication
  * These routes are prefixed with /admin in the main app
@@ -628,6 +628,206 @@ export default async function adminRoutes(fastify, options) {
     }
   });
 }
+
+// Import GHL utility functions
+import { checkAndRefreshToken, refreshGhlToken } from "../utils/ghl.js";
+import Client from "../client.js";
+
+/**
+ * Add this to your admin routes file (routes/admin.js)
+ * This assumes you have the authenticateAdmin middleware already set up
+ */
+
+// GHL Token refresh endpoint - for manual refresh by admin
+fastify.post("/clients/:clientId/refresh-ghl-token", async (request, reply) => {
+  try {
+    const { clientId } = request.params;
+    const { force = false } = request.body; // Optional parameter to force refresh
+
+    // Validate clientId format
+    if (!clientId || typeof clientId !== "string") {
+      fastify.log.warn(`Invalid client ID format: ${clientId}`);
+      return reply.code(400).send({
+        error: "Invalid client ID format",
+        details: "Client ID must be a non-empty string",
+      });
+    }
+
+    // Find the client
+    const client = await Client.findOne({ clientId });
+    if (!client) {
+      fastify.log.warn(`Client not found with ID: ${clientId}`);
+      return reply.code(404).send({
+        error: "Client not found",
+        details: `No client found with ID: ${clientId}`,
+      });
+    }
+
+    // Check if client has GHL integration
+    if (!client.refreshToken) {
+      fastify.log.warn(`Client ${clientId} has no GHL refresh token`);
+      return reply.code(400).send({
+        error: "No GHL integration",
+        details:
+          "This client does not have GHL integration set up (no refresh token)",
+        clientId: client.clientId,
+      });
+    }
+
+    let result;
+    let message;
+
+    if (force) {
+      // Force refresh regardless of token expiration
+      fastify.log.info(
+        `Admin initiated forced GHL token refresh for client: ${clientId}`
+      );
+      const newToken = await refreshGhlToken(clientId);
+
+      message = "GHL token forcefully refreshed";
+      result = {
+        clientId: client.clientId,
+        tokenRefreshed: true,
+        message: "Token was forcefully refreshed as requested",
+      };
+    } else {
+      // Check token and refresh only if needed
+      fastify.log.info(
+        `Admin initiated GHL token validation for client: ${clientId}`
+      );
+
+      // Get the updated client to check if token was refreshed
+      const clientBefore = await Client.findOne({ clientId });
+      const oldExpiryTime = clientBefore.tokenExpiresAt
+        ? new Date(clientBefore.tokenExpiresAt).getTime()
+        : 0;
+
+      // Perform token check and refresh if needed
+      const { accessToken } = await checkAndRefreshToken(clientId);
+
+      // Get the client again to see if the token was actually refreshed
+      const clientAfter = await Client.findOne({ clientId });
+      const newExpiryTime = clientAfter.tokenExpiresAt
+        ? new Date(clientAfter.tokenExpiresAt).getTime()
+        : 0;
+
+      const wasRefreshed = newExpiryTime > oldExpiryTime;
+
+      message = wasRefreshed
+        ? "GHL token was refreshed"
+        : "GHL token is still valid, no refresh needed";
+      result = {
+        clientId: client.clientId,
+        tokenRefreshed: wasRefreshed,
+        tokenExpiresAt: clientAfter.tokenExpiresAt,
+        message: wasRefreshed
+          ? "Token was expired or about to expire and has been refreshed"
+          : "Token is still valid and was not refreshed",
+      };
+    }
+
+    fastify.log.info(
+      `GHL token refresh operation completed for client ${clientId}: ${message}`
+    );
+
+    reply.send({
+      success: true,
+      status: "success",
+      ...result,
+    });
+  } catch (error) {
+    fastify.log.error(`Error refreshing GHL token:`, error);
+
+    // Handle specific error types
+    if (error.message.includes("Token refresh failed")) {
+      return reply.code(400).send({
+        success: false,
+        error: "GHL token refresh failed",
+        details: error.message,
+        recommendation:
+          "The client may need to re-authorize with GHL. Check if the GHL integration is still active.",
+      });
+    }
+
+    reply.code(500).send({
+      success: false,
+      error: "Failed to refresh GHL token",
+      details: error.message,
+    });
+  }
+});
+
+// GHL Token status check endpoint
+fastify.get("/clients/:clientId/ghl-token-status", async (request, reply) => {
+  try {
+    const { clientId } = request.params;
+
+    // Find the client
+    const client = await Client.findOne({ clientId });
+    if (!client) {
+      return reply.code(404).send({
+        error: "Client not found",
+      });
+    }
+
+    // Check if client has GHL integration
+    if (!client.refreshToken) {
+      return reply.code(200).send({
+        clientId: client.clientId,
+        status: "no_integration",
+        message: "This client does not have GHL integration set up",
+      });
+    }
+
+    // Calculate token expiry status
+    const now = new Date();
+    const tokenExpiresAt = client.tokenExpiresAt
+      ? new Date(client.tokenExpiresAt)
+      : null;
+
+    let status;
+    let message;
+
+    if (!tokenExpiresAt) {
+      status = "unknown";
+      message = "Token expiration date is not available";
+    } else if (tokenExpiresAt < now) {
+      status = "expired";
+      message = "Token is expired";
+    } else {
+      // Calculate time until expiration
+      const timeRemaining = tokenExpiresAt.getTime() - now.getTime();
+      const hoursRemaining = Math.floor(timeRemaining / (1000 * 60 * 60));
+      const minutesRemaining = Math.floor(
+        (timeRemaining % (1000 * 60 * 60)) / (1000 * 60)
+      );
+
+      if (timeRemaining < 1000 * 60 * 60) {
+        // Less than 1 hour
+        status = "expiring_soon";
+        message = `Token will expire in ${minutesRemaining} minutes`;
+      } else {
+        status = "valid";
+        message = `Token is valid for ${hoursRemaining} hours and ${minutesRemaining} minutes`;
+      }
+    }
+
+    reply.send({
+      clientId: client.clientId,
+      hasAccessToken: !!client.accessToken,
+      hasRefreshToken: !!client.refreshToken,
+      tokenExpiresAt: client.tokenExpiresAt,
+      status,
+      message,
+    });
+  } catch (error) {
+    fastify.log.error(`Error checking GHL token status:`, error);
+    reply.code(500).send({
+      error: "Failed to check GHL token status",
+      details: error.message,
+    });
+  }
+});
 
 // Helper function to generate a unique ID
 function generateUniqueId() {
