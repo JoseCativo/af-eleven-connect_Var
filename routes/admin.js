@@ -629,15 +629,6 @@ export default async function adminRoutes(fastify, options) {
   });
 }
 
-// Import GHL utility functions
-import { checkAndRefreshToken, refreshGhlToken } from "../utils/ghl.js";
-import Client from "../client.js";
-
-/**
- * Add this to your admin routes file (routes/admin.js)
- * This assumes you have the authenticateAdmin middleware already set up
- */
-
 // GHL Token refresh endpoint - for manual refresh by admin
 fastify.post("/clients/:clientId/refresh-ghl-token", async (request, reply) => {
   try {
