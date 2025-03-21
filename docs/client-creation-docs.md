@@ -123,11 +123,17 @@ curl -X GET https://api.v1.affinitydesign.ca/integrations/authorize/5C3JSOVVFiVm
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
-This will return a response with the authorization URL:
+This will return a response with the authorization URL and current integration status:
 
 ```json
 {
-  "authorizationUrl": "https://marketplace.gohighlevel.com/oauth/chooselocation?response_type=code&client_id=YOUR_GHL_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&scope=contacts.readonly%20contacts.write%20calendars/resources.write%20calendars/resources.readonly%20calendars/groups.write%20calendars/groups.readonly%20calendars/events.write%20calendars/events.readonly%20calendars.write%20calendars.readonly%20companies.readonly&state=5C3JSOVVFiVmBoh8mv3I"
+  "authorizationUrl": "https://marketplace.leadconnectorhq.com/oauth/chooselocation?response_type=code&client_id=YOUR_GHL_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&scope=contacts.readonly%20contacts.write%20calendars/resources.write%20calendars/resources.readonly%20calendars/groups.write%20calendars/groups.readonly%20calendars/events.write%20calendars/events.readonly%20calendars.write%20calendars.readonly%20companies.readonly&state=5C3JSOVVFiVmBoh8mv3I",
+  "clientId": "5C3JSOVVFiVmBoh8mv3I",
+  "currentIntegrationStatus": {
+    "hasAccessToken": false,
+    "hasRefreshToken": false,
+    "tokenExpiresAt": null
+  }
 }
 ```
 
@@ -156,7 +162,7 @@ Your app's `/integrations/callback` endpoint will automatically handle the redir
 
 The stored tokens include:
 
-- `accessToken`: GHL access token (stored separately from the `clientSecret`)
+- `accessToken`: GHL access token (stored in a dedicated field)
 - `refreshToken`: GHL refresh token
 - `tokenExpiresAt`: Token expiration time
 
@@ -167,11 +173,80 @@ No manual action is required for this step as it's handled automatically by your
 After the authorization process completes, verify that the client record has been updated with the GoHighLevel tokens:
 
 ```bash
-curl -X GET https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I \
+curl -X GET https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I/ghl-token-status \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
-The response should show the client with populated `accessToken`, `refreshToken`, and `tokenExpiresAt` fields.
+The response should show the client's GHL token status:
+
+```json
+{
+  "clientId": "5C3JSOVVFiVmBoh8mv3I",
+  "hasAccessToken": true,
+  "hasRefreshToken": true,
+  "tokenExpiresAt": "2025-03-21T15:30:45.398Z",
+  "status": "valid",
+  "message": "Token is valid for 4 hours and 28 minutes"
+}
+```
+
+## GoHighLevel Token Management
+
+The system now includes comprehensive token management for GHL integration. The following mechanisms ensure your integration stays operational:
+
+### Automatic Token Refresh
+
+Access tokens are automatically refreshed when they expire. The system:
+1. Checks token validity before making any GHL API calls
+2. Refreshes expired or soon-to-expire tokens using the refresh token
+3. Updates the client record with the new tokens
+
+### Token Status Checking
+
+Administrators can check the status of a client's GHL integration:
+
+```bash
+curl -X GET https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I/ghl-token-status \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+This provides detailed information about token status:
+- Whether access and refresh tokens are present
+- Token expiration time
+- Human-readable status (valid, expired, expiring soon, etc.)
+
+### Manual Token Refresh
+
+If needed, administrators can manually refresh a client's GHL access token:
+
+```bash
+curl -X POST https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I/refresh-ghl-token \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+The system will only refresh if needed. To force a refresh regardless of current status:
+
+```bash
+curl -X POST https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I/refresh-ghl-token \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{"force": true}'
+```
+
+### Token Migration
+
+For system administrators, there's a one-time migration endpoint to ensure all clients with GHL integration have the proper token structure:
+
+```bash
+curl -X POST https://api.v1.affinitydesign.ca/admin/migrate-ghl-tokens \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+This is particularly useful when updating from an older version of the system.
 
 ## Setting Up a Client Access Token
 
@@ -292,7 +367,8 @@ After creating a client account, linking it to a GHL sub-account (if applicable)
 1. Securely provide the client with their `clientId` and `clientSecret` for API authentication
 2. Instruct the client to log in using `POST /auth/login` to obtain their JWT token
 3. Ensure the client can access their secure endpoints (e.g., `/secure/client`) with the token
-4. Set up any additional configurations specific to the client's needs
+4. If GHL integration is needed, follow the GHL integration steps and verify token status
+5. Set up any additional configurations specific to the client's needs
 
 ## Common Issues and Troubleshooting
 
@@ -328,14 +404,40 @@ If the Twilio phone number is incorrectly formatted or not provisioned in your T
 
 **Resolution**: Ensure the phone number is in E.164 format (+18632704910) and properly provisioned in your Twilio account.
 
-### GHL Authorization Failure
+### GHL Token Issues
 
-If the GHL authorization URL fails:
+If you encounter GHL token-related issues:
 
-- **Redirect URI Not Set**: Ensure the GHL_REDIRECT_URI environment variable is properly set to your callback URL
-- **Invalid Client ID**: Verify the GHL_CLIENT_ID matches what's registered in the GHL Developer Marketplace
-- **User Not Logged In**: The user must be logged into the GoHighLevel platform to approve the app
-- **Network Issues**: Check connectivity between your server and GoHighLevel services
+**Missing Tokens**:
+```json
+{
+  "error": "No GHL integration",
+  "details": "This client does not have GHL integration set up (no refresh token)"
+}
+```
+
+**Resolution**: Complete the GHL authorization flow to obtain tokens.
+
+**Expired Tokens**:
+```json
+{
+  "status": "expired",
+  "message": "Token is expired"
+}
+```
+
+**Resolution**: Use the token refresh endpoint or re-authorize with GHL if the refresh token is also invalid.
+
+**Token Refresh Failed**:
+```json
+{
+  "success": false,
+  "error": "GHL token refresh failed",
+  "recommendation": "The client may need to re-authorize with GHL. Check if the GHL integration is still active."
+}
+```
+
+**Resolution**: The refresh token may be invalid or expired. Complete the GHL authorization flow again.
 
 ### Login Failure Due to Inactive Status
 
@@ -357,255 +459,6 @@ A client account can have one of the following statuses:
 - **Inactive**: The client cannot authenticate (typically used for clients no longer using the service)
 - **Suspended**: The client cannot authenticate (typically used for temporary suspension due to billing or other issues)
 
-## Updating Client Account Details
-
-After a client account is created, you may need to update its details, such as the calendar ID, contact information, or status. This can be done using the update client endpoint.
-
-### API Endpoint Details
-
-**Endpoint:** `PUT /admin/clients/:clientId`  
-**Authentication:** Admin token required  
-**Content-Type:** application/json
-
-### Request Format
-
-Below is the API request to update an existing client account:
-
-```bash
-curl -X PUT https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "calId": "e0JBV5PARC9sbebxcYnY",
-    "clientMeta": {
-      "fullName": "Paul Giovanatto",
-      "email": "paul@affinitydesign.ca",
-      "phone": "+19058363456",
-      "businessName": "Affinity Design",
-      "city": "Canada",
-      "jobTitle": "CEO",
-      "notes": "The Boss ;)"
-    },
-    "agentId": "qvu7240QhEUKLultBI7i",
-    "twilioPhoneNumber": "+18632704910",
-    "status": "Active"
-  }'
-```
-
-### Request Field Descriptions
-
-All fields are optional for updates. Only the fields provided in the request will be updated.
-
-- **calId**: The GHL calendar ID for the sub-account (e.g., "e0JBV5PARC9sbebxcYnY")
-- **clientMeta.fullName**: The client's full name (e.g., "Paul Giovanatto")
-- **clientMeta.email**: The client's email address (e.g., "paul@affinitydesign.ca")
-- **clientMeta.phone**: The client's phone number (in E.164 format, e.g., "+19058363456")
-- **clientMeta.businessName**: The client's company or organization name (e.g., "Affinity Design")
-- **clientMeta.city**: The client's city or region (e.g., "Canada")
-- **clientMeta.jobTitle**: The client's professional title (e.g., "CEO")
-- **clientMeta.notes**: Additional information about the client (e.g., "The Boss ;)")
-- **agentId**: The ID of the ElevenLabs conversational agent (e.g., "qvu7240QhEUKLultBI7i")
-- **twilioPhoneNumber**: The Twilio phone number (in E.164 format, e.g., "+18632704910")
-- **status**: Client account status (e.g., "Active", "Inactive", "Suspended")
-
-### Response Format
-
-Upon successful update, the system returns the updated client details:
-
-```json
-{
-  "message": "Client updated successfully",
-  "client": {
-    "clientId": "5C3JSOVVFiVmBoh8mv3I",
-    "calId": "e0JBV5PARC9sbebxcYnY",
-    "status": "Active",
-    "agentId": "qvu7240QhEUKLultBI7i",
-    "twilioPhoneNumber": "+18632704910",
-    "clientMeta": {
-      "fullName": "Paul Giovanatto",
-      "email": "paul@affinitydesign.ca",
-      "phone": "+19058363456",
-      "businessName": "Affinity Design",
-      "city": "Canada",
-      "jobTitle": "CEO",
-      "notes": "The Boss ;)"
-    },
-    "updatedAt": "2025-03-20T12:30:00.000Z"
-  }
-}
-```
-
-#### Error Responses
-
-- **Client Not Found**:
-
-  ```json
-  {
-    "error": "Client not found"
-  }
-  ```
-
-  **Status Code**: 404 Not Found
-
-- **Duplicate Email**:
-  ```json
-  {
-    "error": "Client already exists with this email",
-    "details": "E11000 duplicate key error collection: clients index: clientMeta.email_1 dup key: { clientMeta.email: \"paul@affinitydesign.ca\" }"
-  }
-  ```
-  **Status Code**: 409 Conflict
-
-## Deleting a Client Account
-
-If a client account is no longer needed, an admin can delete it using the delete client endpoint. This action is permanent and cannot be undone.
-
-### API Endpoint Details
-
-**Endpoint:** `DELETE /admin/clients/:clientId`  
-**Authentication:** Admin token required
-
-### Request Format
-
-Below is the API request to delete a client account:
-
-```bash
-curl -X DELETE https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-### Response Format
-
-Upon successful deletion, the system returns a confirmation message:
-
-```json
-{
-  "message": "Client deleted successfully",
-  "clientId": "5C3JSOVVFiVmBoh8mv3I"
-}
-```
-
-#### Error Responses
-
-- **Client Not Found**:
-  ```json
-  {
-    "error": "Client not found"
-  }
-  ```
-  **Status Code**: 404 Not Found
-
-> **Warning**: Deleting a client account will remove all associated data, including call history and GHL integration tokens. Ensure you have backed up any necessary information before proceeding.
-
-## Viewing Client Details
-
-Admins can retrieve the details of a specific client account using the get client endpoint. This is useful for verifying client information or debugging issues.
-
-### API Endpoint Details
-
-**Endpoint:** `GET /admin/clients/:clientId`  
-**Authentication:** Admin token required
-
-### Request Format
-
-Below is the API request to retrieve a client's details:
-
-```bash
-curl -X GET https://api.v1.affinitydesign.ca/admin/clients/5C3JSOVVFiVmBoh8mv3I \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-### Response Format
-
-The system returns the client's details:
-
-```json
-{
-  "client": {
-    "clientId": "5C3JSOVVFiVmBoh8mv3I",
-    "calId": "e0JBV5PARC9sbebxcYnY",
-    "status": "Active",
-    "agentId": "qvu7240QhEUKLultBI7i",
-    "twilioPhoneNumber": "+18632704910",
-    "clientMeta": {
-      "fullName": "Paul Giovanatto",
-      "email": "paul@affinitydesign.ca",
-      "phone": "+19058363456",
-      "businessName": "Affinity Design",
-      "city": "Canada",
-      "jobTitle": "CEO",
-      "notes": "The Boss ;)"
-    },
-    "createdAt": "2025-03-20T12:00:00.000Z",
-    "updatedAt": "2025-03-20T12:30:00.000Z"
-  }
-}
-```
-
-#### Error Responses
-
-- **Client Not Found**:
-  ```json
-  {
-    "error": "Client not found"
-  }
-  ```
-  **Status Code**: 404 Not Found
-
-## Listing All Clients
-
-Admins can retrieve a list of all client accounts in the system, which is useful for administrative oversight.
-
-### API Endpoint Details
-
-**Endpoint:** `GET /admin/clients`  
-**Authentication:** Admin token required
-
-### Request Format
-
-Below is the API request to list all clients:
-
-```bash
-curl -X GET https://api.v1.affinitydesign.ca/admin/clients \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-### Response Format
-
-The system returns a list of all clients:
-
-```json
-{
-  "clients": [
-    {
-      "clientId": "5C3JSOVVFiVmBoh8mv3I",
-      "calId": "e0JBV5PARC9sbebxcYnY",
-      "status": "Active",
-      "agentId": "qvu7240QhEUKLultBI7i",
-      "twilioPhoneNumber": "+18632704910",
-      "clientMeta": {
-        "fullName": "Paul Giovanatto",
-        "email": "paul@affinitydesign.ca",
-        "phone": "+19058363456",
-        "businessName": "Affinity Design",
-        "city": "Canada",
-        "jobTitle": "CEO",
-        "notes": "The Boss ;)"
-      },
-      "createdAt": "2025-03-20T12:00:00.000Z",
-      "updatedAt": "2025-03-20T12:30:00.000Z"
-    }
-    // Additional clients...
-  ],
-  "total": 1
-}
-```
-
-#### Response Fields
-
-- **clients**: Array of client objects
-- **total**: Total number of clients in the system
-
 ## Best Practices
 
 1. **Secure Storage of Credentials**:
@@ -615,8 +468,10 @@ The system returns a list of all clients:
 
 2. **GHL Integration**:
 
-   - Always link the client to a GHL sub-account immediately after creation if GHL features are required, to avoid delays in functionality.
-   - Verify the `calId` is correct by testing it with the GHL API (e.g., via `/get-availability`) before saving it.
+   - Always link the client to a GHL sub-account immediately after creation if GHL features are required.
+   - Regularly check GHL token status to ensure tokens remain valid.
+   - Use the token migration endpoint after system updates that affect token storage.
+   - Monitor token expiration and implement automated alerts for tokens that fail to refresh.
 
 3. **Client Communication**:
 
@@ -626,6 +481,7 @@ The system returns a list of all clients:
 4. **Regular Audits**:
    - Periodically review client accounts to ensure their statuses are accurate (e.g., mark inactive clients as "Inactive").
    - Check for outdated `calId` values if the GHL sub-account's calendar configuration changes.
+   - Verify GHL token status regularly and refresh tokens as needed.
 
 ## Additional Resources
 

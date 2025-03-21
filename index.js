@@ -28,6 +28,8 @@ import {
   verifyClientToken,
 } from "./auth.js";
 
+import { checkAndRefreshToken, searchGhlContactByPhone } from "./utils/ghl.js";
+
 // Import route modules
 import clientRoutes from "./routes/client.js";
 import adminRoutes from "./routes/admin.js";
@@ -778,7 +780,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
 fastify.post(
   "/get-info",
   {
-    preHandler: authenticateClient, // Add authentication requirement
+    preHandler: authenticateClient,
   },
   async (request, reply) => {
     const { caller_id, called_number, agent_id, call_sid } = request.body;
@@ -820,9 +822,9 @@ fastify.post(
         `[${requestId}] Found client: ${client.clientId}, checking for GHL integration`
       );
 
-      // Check if client has GHL integration (accessToken)
+      // Check if client has GHL integration (refreshToken)
       if (!client.refreshToken) {
-        console.log(`[${requestId}] Client has no GHL access token`);
+        console.log(`[${requestId}] Client has no GHL refresh token`);
         return reply.send({
           conversation_config_override: {
             agent: {
@@ -832,37 +834,49 @@ fastify.post(
         });
       }
 
-      // Check if client has GHL integration
-      if (client.refreshToken) {
-        // Use the new checkAndRefreshToken function to get a valid token
+      let contact = null;
+
+      try {
+        // Use the checkAndRefreshToken function to get a valid token
         const { accessToken } = await checkAndRefreshToken(client.clientId);
 
-        // Then search for the contact
-        const contact = await searchGhlContactByPhone(
+        // Search for the contact using the validated token
+        contact = await searchGhlContactByPhone(
           accessToken,
           caller_id,
           client.clientId
         );
-
-        // If no contact found in GHL, return default greeting
-        if (!contact) {
-          console.log(
-            `[${requestId}] No contact found in GHL for caller: ${caller_id}`
-          );
-          return reply.send({
-            conversation_config_override: {
-              agent: {
-                first_message: "Hello!",
-              },
+      } catch (ghlError) {
+        console.error(`[${requestId}] GHL API error:`, ghlError);
+        // Return default greeting if GHL API fails
+        return reply.send({
+          conversation_config_override: {
+            agent: {
+              first_message: "Hello!",
             },
-          });
-        }
+          },
+        });
+      }
+
+      // If no contact found in GHL, return default greeting
+      if (!contact) {
+        console.log(
+          `[${requestId}] No contact found in GHL for caller: ${caller_id}`
+        );
+        return reply.send({
+          conversation_config_override: {
+            agent: {
+              first_message: "Hello!",
+            },
+          },
+        });
       }
 
       // Map GHL contact data to dynamic variables
       const dynamic_variables = {
         customer_name:
-          `${contact.firstName || ""} ${contact.lastName || ""}`.trim() || "",
+          `${contact.firstName || ""} ${contact.lastName || ""}`.trim() ||
+          "there",
         email: contact.email || "",
         company: contact.companyName || "",
         jobTitle: contact.title || "",
@@ -870,7 +884,7 @@ fastify.post(
       };
 
       console.log(
-        `[${requestId}] Successfully retrieved contact information from GHL`
+        `[${requestId}] Successfully retrieved contact information from GHL for ${dynamic_variables.customer_name}`
       );
 
       // Return personalized response with dynamic variables
@@ -879,9 +893,8 @@ fastify.post(
         conversation_config_override: {
           agent: {
             first_message: `Hey ${
-              dynamic_variables.customer_name.split(" ")[0] +
-                " how is it going?" || "there"
-            }!`,
+              dynamic_variables.customer_name.split(" ")[0]
+            }, how is it going?`,
           },
         },
       });
@@ -900,251 +913,446 @@ fastify.post(
   }
 );
 
-// Route to get a representative's availability
-fastify.get("/get-availability", async (request, reply) => {
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  console.log(`[${requestId}] Get availability request received`);
+// Replace the existing get-availability endpoint with this improved version TODO test
+fastify.get(
+  "/get-availability",
+  {
+    preHandler: authenticateClient, // Require client authentication
+  },
+  async (request, reply) => {
+    const requestId =
+      Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    console.log(`[${requestId}] Get availability request received`);
 
-  // Extract the calendar ID from query parameters
-  const { calendarId, startDate, endDate, timezone } = request.query;
-
-  // Extract API key from authorization header
-  const apiKey = request.headers.authorization?.replace("Bearer ", "");
-
-  // Validate required parameters
-  if (!calendarId) {
-    console.log(`[${requestId}] Error: Missing calendar ID parameter`);
-    return reply.status(400).send({
-      error: "Calendar ID is required",
-      requestId,
-    });
-  }
-
-  if (!apiKey) {
-    console.log(`[${requestId}] Error: Missing authorization header`);
-    return reply.status(401).send({
-      error: "Authorization header with Bearer token is required",
-      requestId,
-    });
-  }
-
-  try {
-    console.log(
-      `[${requestId}] Fetching availability for calendar: ${calendarId}`
-    );
-
-    // Call the function to get availability
-    const availability = await getRepAvailability(
-      calendarId,
-      apiKey,
+    // Extract only the needed parameters from query string
+    const {
       startDate,
       endDate,
-      timezone
-    );
+      timezone = "America/New_York", // Default to America/New_York timezone
+      enableLookBusy,
+    } = request.query;
 
-    // Format and return the availability data
-    const formattedAvailability = {
-      requestId,
-      calendarId,
-      dateRange: {
-        start: startDate || new Date().toISOString().split("T")[0],
-        end:
-          endDate ||
-          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .split("T")[0],
-      },
-      timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-      availability: availability,
-    };
+    try {
+      // Find client using token from authentication
+      const client = await Client.findOne({ clientId: request.clientId });
+      if (!client) {
+        console.log(
+          `[${requestId}] Error: Client not found: ${request.clientId}`
+        );
+        return reply.code(404).send({
+          error: "Client not found",
+          requestId,
+        });
+      }
 
-    console.log(`[${requestId}] Successfully retrieved availability`);
-    reply.send(formattedAvailability);
-  } catch (error) {
-    console.error(`[${requestId}] Error getting availability:`, error);
+      // Use the calId from client record as the calendarId
+      const calendarId = client.calId;
 
-    // Handle different types of errors
-    if (error.message.includes("HTTP error!")) {
-      // Extract status code if present in the error message
-      const statusMatch = error.message.match(/Status: (\d+)/);
-      const status = statusMatch ? parseInt(statusMatch[1]) : 500;
+      if (!calendarId) {
+        console.log(
+          `[${requestId}] Error: No calId found for client: ${request.clientId}`
+        );
+        return reply.code(400).send({
+          error: "Client does not have a calendar ID configured",
+          requestId,
+        });
+      }
 
-      return reply.status(status).send({
-        error: "Failed to fetch availability from Go High Level",
-        details: error.message,
-        requestId,
-      });
-    }
+      // Check client has GHL integration
+      if (!client.refreshToken) {
+        console.log(`[${requestId}] Error: Client has no GHL integration`);
+        return reply.code(400).send({
+          error: "Client does not have GHL integration set up",
+          requestId,
+        });
+      }
 
-    reply.status(500).send({
-      error: "Failed to get availability",
-      details: error.message,
-      requestId,
-    });
-  }
-});
-
-// Route to book an appointment
-fastify.post("/book-appointment", async (request, reply) => {
-  const requestId =
-    Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  console.log(`[${requestId}] Book appointment request received`);
-
-  // Extract API key from authorization header
-  const apiKey = request.headers.authorization?.replace("Bearer ", "");
-
-  // Extract appointment details from request body
-  const { calendarId, startTime, endTime, contactInfo, timezone, notes } =
-    request.body;
-
-  // Validate required parameters
-  if (!calendarId) {
-    console.log(`[${requestId}] Error: Missing calendar ID parameter`);
-    return reply.status(400).send({
-      error: "Calendar ID is required",
-      requestId,
-    });
-  }
-
-  if (!startTime || !endTime) {
-    console.log(`[${requestId}] Error: Missing start or end time`);
-    return reply.status(400).send({
-      error: "Both startTime and endTime are required",
-      requestId,
-    });
-  }
-
-  if (!contactInfo || !contactInfo.email) {
-    console.log(`[${requestId}] Error: Missing contact information`);
-    return reply.status(400).send({
-      error: "Contact information with at least an email is required",
-      requestId,
-    });
-  }
-
-  if (!apiKey) {
-    console.log(`[${requestId}] Error: Missing authorization header`);
-    return reply.status(401).send({
-      error: "Authorization header with Bearer token is required",
-      requestId,
-    });
-  }
-
-  try {
-    console.log(
-      `[${requestId}] Booking appointment for calendar: ${calendarId}`
-    );
-
-    // Enhance contact info with notes if provided
-    const enhancedContactInfo = {
-      ...contactInfo,
-    };
-
-    if (notes) {
-      enhancedContactInfo.notes = notes;
-    }
-
-    // Add caller ID for later reference
-    enhancedContactInfo.externalId = requestId;
-
-    // Book the appointment
-    const appointmentResult = await bookGHLAppointment(
-      calendarId,
-      apiKey,
-      startTime,
-      endTime,
-      enhancedContactInfo,
-      timezone
-    );
-
-    // Format and return the booking data
-    const bookingResponse = {
-      requestId,
-      status: "success",
-      message: "Appointment booked successfully",
-      appointmentId: appointmentResult.id || appointmentResult.appointmentId,
-      details: {
-        calendarId,
-        startTime,
-        endTime,
-        timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-        contact: {
-          email: contactInfo.email,
-          name:
-            contactInfo.name ||
-            contactInfo.firstName + " " + (contactInfo.lastName || ""),
-        },
-      },
-    };
-
-    // If we have a phone integration configured, we could trigger a call to confirm
-    if (
-      configStore.TWILIO_PHONE_NUMBERS.length > 0 &&
-      configStore.ELEVENLABS_AGENT_IDS.length > 0 &&
-      contactInfo.phone
-    ) {
-      // Log that we could make a confirmation call
       console.log(
-        `[${requestId}] Could notify ${contactInfo.phone} about appointment confirmation`
+        `[${requestId}] Fetching availability for calendar: ${calendarId}`
       );
 
-      // Add notification info to response
-      bookingResponse.notification = {
-        message:
-          "Contact has a phone number. You can use make-outbound-call to send a confirmation.",
-        phone: contactInfo.phone,
+      // Get or refresh GHL access token
+      const { accessToken } = await checkAndRefreshToken(client.clientId);
+
+      // Calculate date parameters
+      const startTimestamp = startDate
+        ? new Date(startDate).getTime()
+        : new Date().getTime();
+
+      const endTimestamp = endDate
+        ? new Date(endDate).getTime()
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).getTime();
+
+      // Set enableLookBusy default
+      const lookBusy = enableLookBusy === "true" || enableLookBusy === true;
+
+      // Construct the URL with proper query parameters
+      let url = `https://services.leadconnectorhq.com/calendars/${calendarId}/free-slots?startDate=${startTimestamp}&endDate=${endTimestamp}`;
+
+      // Add optional parameters if provided
+      url += `&timezone=${encodeURIComponent(timezone)}`;
+      if (lookBusy) url += `&enableLookBusy=true`;
+
+      // Make the API request to GHL
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Version: "2021-04-15",
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(
+          `[${requestId}] GHL API error: ${response.status} ${response.statusText}`,
+          errorText
+        );
+        throw new Error(
+          `GHL API error: ${response.status} ${response.statusText} - ${errorText}`
+        );
+      }
+
+      const availabilityData = await response.json();
+
+      // Format the response
+      const formattedAvailability = {
+        requestId,
+        dateRange: {
+          start: new Date(startTimestamp).toISOString(),
+          end: new Date(endTimestamp).toISOString(),
+        },
+        timezone: timezone,
+        availability: availabilityData,
+        slots: availabilityData?._dates_?.slots || [],
       };
-    }
 
-    console.log(`[${requestId}] Successfully booked appointment`);
-    reply.send(bookingResponse);
-  } catch (error) {
-    console.error(`[${requestId}] Error booking appointment:`, error);
+      console.log(
+        `[${requestId}] Successfully retrieved availability: ${formattedAvailability.slots.length} slots`
+      );
+      return reply.send(formattedAvailability);
+    } catch (error) {
+      console.error(`[${requestId}] Error getting availability:`, error);
 
-    // Handle different types of errors
-    if (error.message.includes("HTTP error!")) {
-      // Extract status code if present in the error message
-      const statusMatch = error.message.match(/Status: (\d+)/);
-      const status = statusMatch ? parseInt(statusMatch[1]) : 500;
+      // Handle different types of errors
+      if (error.message.includes("GHL API error")) {
+        // Extract status code if present in the error message
+        const statusMatch = error.message.match(/GHL API error: (\d+)/);
+        const status = statusMatch ? parseInt(statusMatch[1]) : 500;
 
-      // Common booking errors
-      if (
-        error.message.includes("already booked") ||
-        error.message.includes("unavailable")
-      ) {
-        return reply.status(409).send({
-          error: "Time slot is no longer available",
+        if (status === 401 || status === 403) {
+          return reply.code(status).send({
+            error: "GHL authentication failed",
+            details: "The GHL integration may need to be re-authorized",
+            requestId,
+          });
+        }
+
+        return reply.code(status).send({
+          error: "Failed to fetch availability from GoHighLevel",
           details: error.message,
           requestId,
         });
       }
 
-      if (
-        error.message.includes("invalid calendar") ||
-        error.message.includes("not found")
-      ) {
-        return reply.status(404).send({
-          error: "Calendar not found or invalid",
-          details: error.message,
-          requestId,
-        });
-      }
-
-      return reply.status(status).send({
-        error: "Failed to book appointment in Go High Level",
+      return reply.code(500).send({
+        error: "Failed to get availability",
         details: error.message,
         requestId,
       });
     }
-
-    reply.status(500).send({
-      error: "Failed to book appointment",
-      details: error.message,
-      requestId,
-    });
   }
-});
+);
+
+// Route to book an appointment TODO test
+fastify.post(
+  "/book-appointment",
+  {
+    preHandler: authenticateClient, // Require client authentication
+  },
+  async (request, reply) => {
+    const requestId =
+      Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    console.log(`[${requestId}] Book appointment request received`);
+
+    // Extract appointment details from request body - only the required ones
+    const {
+      startTime,
+      endTime,
+      phone, // Phone parameter for contact lookup
+      meeting_title,
+    } = request.body;
+
+    try {
+      // Find client using token from authentication
+      const client = await Client.findOne({ clientId: request.clientId });
+      if (!client) {
+        console.log(
+          `[${requestId}] Error: Client not found: ${request.clientId}`
+        );
+        return reply.code(404).send({
+          error: "Client not found",
+          requestId,
+        });
+      }
+
+      // Use the calId from client record as the calendarId
+      const calendarId = client.calId;
+
+      if (!calendarId) {
+        console.log(
+          `[${requestId}] Error: No calId found for client: ${request.clientId}`
+        );
+        return reply.code(400).send({
+          error: "Client does not have a calendar ID configured",
+          requestId,
+        });
+      }
+
+      // Validate other required parameters
+      if (!startTime || !endTime) {
+        console.log(`[${requestId}] Error: Missing start or end time`);
+        return reply.code(400).send({
+          error: "Both startTime and endTime are required",
+          requestId,
+        });
+      }
+
+      if (!phone) {
+        console.log(`[${requestId}] Error: Missing phone number`);
+        return reply.code(400).send({
+          error: "A phone number is required to find the contact",
+          requestId,
+        });
+      }
+
+      // Check client has GHL integration
+      if (!client.refreshToken) {
+        console.log(`[${requestId}] Error: Client has no GHL integration`);
+        return reply.code(400).send({
+          error: "Client does not have GHL integration set up",
+          requestId,
+        });
+      }
+
+      console.log(
+        `[${requestId}] Booking appointment for calendar: ${calendarId}`
+      );
+
+      // Get or refresh GHL access token
+      const { accessToken } = await checkAndRefreshToken(client.clientId);
+
+      // Lookup the contact by phone number to get contact info and ID
+      try {
+        // Search for contact
+        const contactSearchResult = await searchGhlContactByPhone(
+          accessToken,
+          phone,
+          client.clientId
+        );
+
+        if (!contactSearchResult) {
+          console.log(
+            `[${requestId}] Error: No contact found for phone: ${phone}`
+          );
+          return reply.code(404).send({
+            error: "Contact not found in GoHighLevel",
+            details: "No contact exists with the provided phone number",
+            requestId,
+          });
+        }
+
+        // Extract the contact data
+        const contactData = contactSearchResult;
+        const contactId = contactData.id;
+
+        if (!contactId) {
+          console.log(
+            `[${requestId}] Error: Invalid contact data returned: ${JSON.stringify(
+              contactData
+            )}`
+          );
+          return reply.code(500).send({
+            error: "Invalid contact data returned from GHL",
+            requestId,
+          });
+        }
+
+        console.log(`[${requestId}] Found contact with ID: ${contactId}`);
+
+        // Extract contact details for the title
+        const contactFirstName =
+          contactData.firstName ||
+          (contactData.name ? contactData.name.split(" ")[0] : null) ||
+          "Client";
+
+        // Create the custom appointment title
+        const title = `${contactFirstName} x ${
+          client.clientMeta.businessName || "Business"
+        } - ${meeting_title || "Consultation"}`;
+        console.log(`[${requestId}] Generated appointment title: "${title}"`);
+
+        // Now that we have the contactId, book the appointment
+        const endpoint =
+          "https://services.leadconnectorhq.com/calendars/events/appointments";
+
+        // Set fixed parameters as specified
+        const appointmentStatus = "new";
+        const address = "Google Meet";
+        const ignoreDateRange = false;
+        const toNotify = true;
+        const ignoreFreeSlotValidation = false;
+
+        // Prepare appointment data according to the API spec
+        const appointmentData = {
+          calendarId,
+          locationId: client.clientId, // GHL location ID is the same as our clientId
+          contactId,
+          startTime,
+          endTime,
+          title,
+          meetingLocationType: "default", // Always use default as specified
+          appointmentStatus,
+          address,
+          ignoreDateRange,
+          toNotify,
+          ignoreFreeSlotValidation,
+        };
+
+        console.log(`[${requestId}] Sending appointment request to GHL`);
+
+        // Make the API request to book appointment
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            Version: "2021-04-15",
+          },
+          body: JSON.stringify(appointmentData),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(
+            `[${requestId}] GHL appointment API error: ${response.status}`,
+            errorText
+          );
+          throw new Error(
+            `GHL appointment API error: ${response.status} - ${errorText}`
+          );
+        }
+
+        const appointmentResult = await response.json();
+
+        // Format and return the booking data
+        const bookingResponse = {
+          requestId,
+          status: "success",
+          message: "Appointment booked successfully",
+          appointmentId: appointmentResult.id,
+          details: {
+            calendarId,
+            locationId: client.clientId,
+            contactId,
+            startTime,
+            endTime,
+            title,
+            status: appointmentResult.appointmentStatus || appointmentStatus,
+            address: appointmentResult.address || address,
+            isRecurring: appointmentResult.isRecurring || false,
+          },
+          contact: {
+            id: contactId,
+            name:
+              contactData.name ||
+              `${contactData.firstName || ""} ${
+                contactData.lastName || ""
+              }`.trim(),
+            phone: phone,
+            email: contactData.email || "",
+          },
+        };
+
+        // If client has call capability, include notification option
+        if (client.twilioPhoneNumber && client.agentId) {
+          // Add notification info to response
+          bookingResponse.notification = {
+            message:
+              "Contact has a phone number. You can use make-outbound-call to send a confirmation.",
+            phone: phone,
+          };
+        }
+
+        console.log(
+          `[${requestId}] Successfully booked appointment with ID: ${appointmentResult.id}`
+        );
+        return reply.send(bookingResponse);
+      } catch (contactError) {
+        console.error(`[${requestId}] Error finding contact:`, contactError);
+        return reply.code(400).send({
+          error: "Failed to find contact",
+          details: contactError.message,
+          requestId,
+        });
+      }
+    } catch (error) {
+      console.error(`[${requestId}] Error booking appointment:`, error);
+
+      // Handle different types of errors
+      if (error.message.includes("GHL")) {
+        // Extract status code if present in the error message
+        const statusMatch = error.message.match(/GHL .* API error: (\d+)/);
+        const status = statusMatch ? parseInt(statusMatch[1]) : 500;
+
+        if (status === 401 || status === 403) {
+          return reply.code(status).send({
+            error: "GHL authentication failed",
+            details: "The GHL integration may need to be re-authorized",
+            requestId,
+          });
+        }
+
+        // Common booking errors - check for specific error messages
+        if (
+          error.message.toLowerCase().includes("already booked") ||
+          error.message.toLowerCase().includes("unavailable") ||
+          error.message.toLowerCase().includes("not available")
+        ) {
+          return reply.code(409).send({
+            error: "Time slot is no longer available",
+            details: error.message,
+            requestId,
+          });
+        }
+
+        if (
+          error.message.toLowerCase().includes("invalid calendar") ||
+          error.message.toLowerCase().includes("not found")
+        ) {
+          return reply.code(404).send({
+            error: "Calendar not found or invalid",
+            details: error.message,
+            requestId,
+          });
+        }
+
+        return reply.code(status).send({
+          error: "Failed to book appointment in GoHighLevel",
+          details: error.message,
+          requestId,
+        });
+      }
+
+      return reply.code(500).send({
+        error: "Failed to book appointment",
+        details: error.message,
+        requestId,
+      });
+    }
+  }
+);
 
 // Endpoint to handle Twilio status callbacks
 fastify.post("/call-status", async (request, reply) => {

@@ -38,19 +38,21 @@ async function checkAndRefreshToken(clientId) {
       `Token expired or missing for client ${clientId}, refreshing...`
     );
     const newAccessToken = await refreshGhlToken(clientId);
-    
+
     // Reload client to get the updated token
     client = await Client.findOne({ clientId });
-    
+
     if (!client.accessToken) {
       console.error(`Failed to update access token for client ${clientId}`);
-      throw new Error("Token refresh failed: access token not updated in database");
+      throw new Error(
+        "Token refresh failed: access token not updated in database"
+      );
     }
   }
 
   return {
     accessToken: client.accessToken,
-    locationId: clientId // In your system, the clientId is the GHL location ID
+    locationId: clientId, // In your system, the clientId is the GHL location ID
   };
 }
 
@@ -62,7 +64,9 @@ async function checkAndRefreshToken(clientId) {
 async function refreshGhlToken(clientId) {
   const client = await Client.findOne({ clientId });
   if (!client || !client.refreshToken) {
-    throw new Error(`Client or refresh token not found for client: ${clientId}`);
+    throw new Error(
+      `Client or refresh token not found for client: ${clientId}`
+    );
   }
 
   try {
@@ -183,32 +187,34 @@ async function searchGhlContactByPhone(
       const client = await Client.findOne({
         $or: [
           { accessToken: accessToken },
-          { clientSecret: accessToken } // For backward compatibility
-        ]
+          { clientSecret: accessToken }, // For backward compatibility
+        ],
       });
-      
+
       if (!client) {
         console.error("No client found with the provided access token");
         return null;
       }
-      
+
       locationId = client.clientId;
     }
 
     // Validate token if needed - if locationId is provided, we can check
     if (locationId) {
       // This is a clientId in our system, so we can check and refresh the token
-      const { accessToken: validToken } = await checkAndRefreshToken(locationId);
+      const { accessToken: validToken } = await checkAndRefreshToken(
+        locationId
+      );
       accessToken = validToken; // Use the valid token
     }
-    
+
     if (!accessToken || !phoneNumber) {
       console.error("Missing required parameters for GHL contact search");
       return null;
     }
 
     // Normalize phone number format - remove any non-digit characters
-    const normalizedPhone = phoneNumber.replace(/\D/g, '');
+    const normalizedPhone = phoneNumber.replace(/\D/g, "");
 
     // Construct request body according to API specifications
     const requestBody = {
@@ -232,7 +238,7 @@ async function searchGhlContactByPhone(
 
     // Make the API request
     const response = await fetch(
-      "https://services.gohighlevel.com/v2/contacts/search",
+      "https://services.leadconnectorhq.com/contacts/search",
       {
         method: "POST",
         headers: {
@@ -271,29 +277,40 @@ async function migrateClientTokens() {
         // Clients who might have tokens stored in clientSecret
         { refreshToken: { $exists: true }, accessToken: { $exists: false } },
         // Clients with accessToken in wrong field
-        { refreshToken: { $exists: true }, clientSecret: { $exists: true }, accessToken: { $exists: false } }
-      ]
+        {
+          refreshToken: { $exists: true },
+          clientSecret: { $exists: true },
+          accessToken: { $exists: false },
+        },
+      ],
     });
-    
+
     console.log(`Found ${clients.length} clients that may need migration`);
-    
+
     let migratedCount = 0;
-    
+
     for (const client of clients) {
       // Skip clients without refreshToken
       if (!client.refreshToken) continue;
-      
+
       try {
         // Refresh the token to get a new access token
         await refreshGhlToken(client.clientId);
         migratedCount++;
-        console.log(`Successfully migrated tokens for client ${client.clientId}`);
+        console.log(
+          `Successfully migrated tokens for client ${client.clientId}`
+        );
       } catch (error) {
-        console.error(`Failed to migrate tokens for client ${client.clientId}:`, error);
+        console.error(
+          `Failed to migrate tokens for client ${client.clientId}:`,
+          error
+        );
       }
     }
-    
-    console.log(`Migration complete. Successfully migrated ${migratedCount} out of ${clients.length} clients`);
+
+    console.log(
+      `Migration complete. Successfully migrated ${migratedCount} out of ${clients.length} clients`
+    );
     return { total: clients.length, migrated: migratedCount };
   } catch (error) {
     console.error("Error during client token migration:", error);
@@ -307,5 +324,5 @@ export {
   searchGhlContactByPhone,
   checkAndRefreshToken,
   isTokenValid,
-  migrateClientTokens
+  migrateClientTokens,
 };
