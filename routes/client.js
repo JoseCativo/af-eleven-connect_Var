@@ -172,7 +172,7 @@ export default async function clientRoutes(fastify, options) {
 
     // Validate phone number
     const phoneRegex = /^\+[1-9]\d{1,14}$/;
-    if (!phone) {
+    if (!to) {
       fastify.log.warn(
         `[${requestId}] Error: Destination phone number missing`
       );

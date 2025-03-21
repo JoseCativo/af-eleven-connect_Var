@@ -781,7 +781,7 @@ fastify.post(
   }
 );
 
-// Replace the existing get-availability endpoint with this improved version TODO test
+// Replace the existing get-availability endpoint with this improved version
 fastify.get(
   "/get-availability",
   {
@@ -933,7 +933,7 @@ fastify.get(
   }
 );
 
-// Route to book an appointment TODO test
+// Route to book an appointment
 fastify.post(
   "/book-appointment",
   {
@@ -1066,7 +1066,7 @@ fastify.post(
           "https://services.leadconnectorhq.com/calendars/events/appointments";
 
         // Set fixed parameters as specified
-        const appointmentStatus = "new";
+        const appointmentStatus = "confirmed";
         const address = "Google Meet";
         const ignoreDateRange = false;
         const toNotify = true;
@@ -1216,6 +1216,200 @@ fastify.post(
       return reply.code(500).send({
         error: "Failed to book appointment",
         details: error.message,
+        requestId,
+      });
+    }
+  }
+);
+
+// Add this to your index.js file
+fastify.post(
+  "/make-outbound-call",
+  {
+    preHandler: authenticateClient, // Secure the endpoint with client authentication
+  },
+  async (request, reply) => {
+    const { phone } = request.body;
+
+    // Generate a request ID for tracking
+    const requestId =
+      Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
+    fastify.log.info(`[${requestId}] Outbound call request received`);
+
+    // Validate phone number
+    const phoneRegex = /^\+[1-9]\d{1,14}$/;
+    if (!phone) {
+      // Fixed bug from original function which used 'to' instead of 'phone'
+      fastify.log.warn(
+        `[${requestId}] Error: Destination phone number missing`
+      );
+      return reply.code(400).send({
+        error: "Destination phone number is required",
+        requestId,
+      });
+    }
+
+    if (!phoneRegex.test(phone)) {
+      fastify.log.warn(
+        `[${requestId}] Error: Invalid destination phone format: ${phone}`
+      );
+      return reply.code(400).send({
+        error: "Phone number must be in E.164 format (e.g., +12125551234)",
+        requestId,
+      });
+    }
+
+    try {
+      // Find client directly using mongoose model instead of findClientById helper
+      const client = await Client.findOne({ clientId: request.clientId });
+
+      if (!client) {
+        fastify.log.warn(
+          `[${requestId}] Error: Client not found with ID: ${request.clientId}`
+        );
+        return reply.code(404).send({
+          error: "Client not found",
+          requestId,
+        });
+      }
+
+      // Check if client is active
+      if (client.status !== "Active") {
+        fastify.log.warn(
+          `[${requestId}] Error: Client is not active: ${client.status}`
+        );
+        return reply.code(403).send({
+          error: `Client is not active (status: ${client.status})`,
+          requestId,
+        });
+      }
+
+      // Build the webhook URL with all dynamic variables
+      let webhookUrl = `https://${request.headers.host}/outbound-call-twiml?`;
+
+      // Add parameters to the URL
+      const params = {
+        first_message: client.clientMeta.fullName.split(" ")[0] + "?",
+        clientId: client.clientId,
+        agentId: client.agentId,
+        full_name: client.clientMeta.fullName,
+        business_name: client.clientMeta.businessName,
+        city: client.clientMeta.city,
+        job_title: client.clientMeta.jobTitle,
+        email: client.clientMeta.email,
+        phone,
+        requestId,
+      };
+
+      // Convert parameters to URL query string
+      const queryParams = [];
+      for (const [key, value] of Object.entries(params)) {
+        if (value) {
+          queryParams.push(
+            `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+          );
+        }
+      }
+
+      webhookUrl += queryParams.join("&");
+
+      fastify.log.info(
+        `[${requestId}] Using webhook URL with dynamic variables`
+      );
+
+      // Create the call
+      const call = await twilioClient.calls.create({
+        url: webhookUrl,
+        to: phone,
+        from: client.twilioPhoneNumber,
+        statusCallback: `https://${request.headers.host}/call-status?requestId=${requestId}&clientId=${client.clientId}`,
+        statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+        statusCallbackMethod: "POST",
+      });
+
+      fastify.log.info(
+        `[${requestId}] Outbound call initiated successfully: ${call.sid}`
+      );
+
+      // Create call data object
+      const callData = {
+        callData: {
+          callSid: call.sid,
+          requestId,
+          phone,
+          from: client.twilioPhoneNumber,
+          agentId: client.agentId,
+          startTime: new Date(),
+          status: "initiated",
+          callCount: 1,
+        },
+        callDetails: {
+          callOutcome: "",
+          callSummary: "",
+          callTranscript: "",
+        },
+      };
+
+      // Add call to client's call history in the database
+      await addCallToHistory(client.clientId, callData);
+
+      reply.send({
+        success: true,
+        message: "Call initiated successfully",
+        callSid: call.sid,
+        requestId,
+      });
+    } catch (error) {
+      fastify.log.error(`[${requestId}] Error initiating call:`, error);
+
+      // Handle Twilio errors
+      let statusCode = 500;
+      let errorMessage = "Failed to initiate call";
+      let errorDetails = error.message;
+      let resolution = null;
+
+      if (error.code) {
+        switch (error.code) {
+          case 21211:
+            statusCode = 400;
+            errorMessage = "Invalid 'To' phone number";
+            resolution = "Check the phone number format and try again";
+            break;
+          case 21214:
+            statusCode = 400;
+            errorMessage = "Invalid 'From' phone number";
+            resolution =
+              "Verify the Twilio phone number is active and properly configured";
+            break;
+          case 20404:
+            statusCode = 404;
+            errorMessage = "Twilio account not found or unauthorized";
+            resolution = "Check your Twilio account credentials";
+            break;
+          case 20003:
+            statusCode = 403;
+            errorMessage = "Permission denied";
+            resolution =
+              "Verify that your Twilio account has voice capabilities enabled";
+            break;
+          case 13223:
+            statusCode = 402;
+            errorMessage = "Insufficient funds";
+            resolution = "Add funds to your Twilio account";
+            break;
+          case 13224:
+            statusCode = 429;
+            errorMessage = "Rate limit exceeded";
+            resolution = "Try again after some time";
+            break;
+        }
+      }
+
+      reply.code(statusCode).send({
+        error: errorMessage,
+        details: errorDetails,
+        resolution,
         requestId,
       });
     }
