@@ -374,10 +374,13 @@ fastify.register(async (fastifyInstance) => {
                 dynamicVariables.phone = customParameters.phone;
               if (customParameters?.agentId)
                 dynamicVariables.agentId = customParameters.agentId;
+
               if (customParameters?.todays_date)
                 dynamicVariables.todays_date = customParameters.todays_date;
+
               if (customParameters?.one_week_date)
                 dynamicVariables.one_week_date = customParameters.one_week_date;
+
               if (customParameters?.four_week_date)
                 dynamicVariables.four_week_date =
                   customParameters.four_week_date;
@@ -649,9 +652,12 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
   if (agentId)
     twimlResponse += `\n          <Parameter name="agentId" value="${agentId}" />`;
-  twimlResponse += `\n          <Parameter name="agentId" value="${todays_date}" />`;
-  twimlResponse += `\n          <Parameter name="agentId" value="${one_week_date}" />`;
-  twimlResponse += `\n          <Parameter name="agentId" value="${four_week_date}" />`;
+  if (todays_date)
+    twimlResponse += `\n          <Parameter name="agentId" value="${todays_date}" />`;
+  if (one_week_date)
+    twimlResponse += `\n          <Parameter name="agentId" value="${one_week_date}" />`;
+  if (four_week_date)
+    twimlResponse += `\n          <Parameter name="agentId" value="${four_week_date}" />`;
   // Close the TwiML tags
   twimlResponse += `
         </Stream>
