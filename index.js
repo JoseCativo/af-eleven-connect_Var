@@ -1479,6 +1479,30 @@ fastify.post("/call-status", async (request, reply) => {
   }
 });
 
+// Add this route to your index.js file
+
+// Simple endpoint to return the current Unix timestamp in milliseconds
+fastify.get("/get-time", async (request, reply) => {
+  try {
+    // Get current timestamp in milliseconds
+    const timestamp = Date.now();
+
+    // Log the request
+    fastify.log.info(`Timestamp requested: ${timestamp}`);
+
+    // Return timestamp in JSON format
+    reply.send({
+      todays_date: timestamp.toString(),
+    });
+  } catch (error) {
+    fastify.log.error("Error getting timestamp:", error);
+    reply.code(500).send({
+      error: "Failed to get timestamp",
+      details: error.message,
+    });
+  }
+});
+
 // Add this helper function to map Twilio statuses to your schema's enum values
 function mapTwilioStatusToSchema(twilioStatus) {
   switch (twilioStatus.toLowerCase()) {
