@@ -13,6 +13,15 @@ import {
   checkAndRefreshToken,
   refreshGhlToken,
 } from "../utils/ghl.js";
+
+import {
+  handleClientLogin,
+  verifyClientToken,
+  generateToken,
+  generateAdminToken,
+  authenticateClient,
+  verifyToken,
+} from "../auth.js";
 /**
  * Admin routes - all require admin authentication
  * These routes are prefixed with /admin in the main app
