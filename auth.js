@@ -93,6 +93,7 @@ export async function authenticateClient(request, reply) {
 // Middleware to authenticate admin requests
 // Middleware to authenticate admin requests
 export async function authenticateAdmin(request, reply) {
+  console.log("Admin authentication middleware called:", request.headers);
   try {
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
