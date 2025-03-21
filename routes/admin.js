@@ -22,6 +22,15 @@ import {
   authenticateClient,
   verifyToken,
 } from "../auth.js";
+
+// Helper function to generate a unique ID
+function generateUniqueId() {
+  return (
+    Math.random().toString(36).substring(2, 15) +
+    Math.random().toString(36).substring(2, 15)
+  );
+}
+
 /**
  * Admin routes - all require admin authentication
  * These routes are prefixed with /admin in the main app
@@ -880,11 +889,4 @@ export default async function adminRoutes(fastify, options) {
       });
     }
   });
-}
-// Helper function to generate a unique ID
-function generateUniqueId() {
-  return (
-    Math.random().toString(36).substring(2, 15) +
-    Math.random().toString(36).substring(2, 15)
-  );
 }
