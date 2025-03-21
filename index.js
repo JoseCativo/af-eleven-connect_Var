@@ -354,7 +354,7 @@ fastify.register(async (fastifyInstance) => {
             console.log("[ElevenLabs] Connected to Conversational AI");
 
             try {
-              // Create the config with proper format TODO test
+              // Create the config with proper format
               const todays_date = calculateTime(0);
               const one_week_date = calculateTime(7);
               const four_week_date = calculateTime(0, 4);
@@ -1254,7 +1254,8 @@ fastify.addContentTypeParser(
     }
   }
 );
-// Add this to your index.js file
+
+// Make call
 fastify.post(
   "/make-outbound-call",
   {
@@ -1262,6 +1263,15 @@ fastify.post(
   },
   async (request, reply) => {
     const { phone } = request.body;
+    const {
+      first_message,
+      f_name,
+      l_name,
+      business_name,
+      city,
+      job_title,
+      email,
+    } = request.params;
 
     // Generate a request ID for tracking
     const requestId =
@@ -1322,13 +1332,13 @@ fastify.post(
 
       // Add parameters to the URL
       const params = {
-        first_message: client.clientMeta.fullName.split(" ")[0] + "?",
+        first_message: first_message,
         agentId: client.agentId,
-        full_name: client.clientMeta.fullName,
-        business_name: client.clientMeta.businessName,
-        city: client.clientMeta.city,
-        job_title: client.clientMeta.jobTitle,
-        email: client.clientMeta.email,
+        full_name: f_name + l_name,
+        business_name: business_name,
+        city: city,
+        job_title: job_title,
+        email: email,
         phone,
         requestId,
       };
