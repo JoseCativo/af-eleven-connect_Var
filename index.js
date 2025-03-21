@@ -84,14 +84,14 @@ if (!configStore.TWILIO_ACCOUNT_SID || !configStore.TWILIO_AUTH_TOKEN) {
 const fastify = Fastify({ logger: true });
 // Register route groups
 fastify.register(fastifyWs);
+fastify.register(adminRoutes, {
+  prefix: "/admin",
+  preHandler: authenticateAdmin,
+});
 fastify.register(authRoutes, { prefix: "/auth" });
 fastify.register(clientRoutes, {
   prefix: "/secure",
   preHandler: authenticateClient,
-});
-fastify.register(adminRoutes, {
-  prefix: "/admin",
-  preHandler: authenticateAdmin,
 });
 fastify.register(integrationsRoutes, { prefix: "/integrations" });
 
