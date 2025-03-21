@@ -1225,6 +1225,23 @@ fastify.post(
   }
 );
 
+// Add this before your route registrations
+fastify.addContentTypeParser(
+  "application/x-www-form-urlencoded",
+  { parseAs: "string" },
+  (req, body, done) => {
+    try {
+      const parsed = new URLSearchParams(body);
+      const result = {};
+      for (const [key, value] of parsed) {
+        result[key] = value;
+      }
+      done(null, result);
+    } catch (error) {
+      done(error);
+    }
+  }
+);
 // Add this to your index.js file
 fastify.post(
   "/make-outbound-call",
@@ -1425,6 +1442,9 @@ fastify.post("/call-status", async (request, reply) => {
   console.log(`[${requestId}] Call status update: ${CallSid} -> ${CallStatus}`);
 
   try {
+    // Map Twilio status to your schema's allowed values
+    const mappedStatus = mapTwilioStatusToSchema(CallStatus);
+
     // Find the client with this call in their history
     const query = clientId
       ? { clientId, "callHistory.callData.callSid": CallSid }
@@ -1434,7 +1454,7 @@ fastify.post("/call-status", async (request, reply) => {
       query,
       {
         $set: {
-          "callHistory.$.callData.status": CallStatus,
+          "callHistory.$.callData.status": mappedStatus,
           "callHistory.$.callData.duration": CallDuration
             ? parseInt(CallDuration)
             : undefined,
@@ -1457,6 +1477,25 @@ fastify.post("/call-status", async (request, reply) => {
     reply.send({ success: false, error: error.message });
   }
 });
+
+// Add this helper function to map Twilio statuses to your schema's enum values
+function mapTwilioStatusToSchema(twilioStatus) {
+  switch (twilioStatus.toLowerCase()) {
+    case "initiated":
+    case "ringing":
+    case "in-progress":
+      return "follow_up";
+    case "completed":
+      return "hang_up";
+    case "busy":
+    case "failed":
+    case "no-answer":
+    case "canceled":
+      return "dnc";
+    default:
+      return "follow_up";
+  }
+}
 
 // Start the Fastify server
 const start = async () => {
