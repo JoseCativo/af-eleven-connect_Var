@@ -332,9 +332,7 @@ fastify.register(async (fastifyInstance) => {
         try {
           // Use the agent ID from parameters or default
           const agentId =
-            customParameters?.agentId ||
-            req.query.agentId ||
-            configStore.ELEVENLABS_AGENT_IDS[0];
+            customParameters?.agentId || configStore.ELEVENLABS_AGENT_IDS[0];
 
           if (!agentId) {
             throw new Error("No agent ID available");
@@ -604,6 +602,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     email,
     phone,
     requestId,
+    agentId,
   } = request.query;
 
   console.log(
@@ -634,6 +633,8 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     twimlResponse += `\n          <Parameter name="phone" value="${phone}" />`;
   if (requestId)
     twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
+  if (requestId)
+    twimlResponse += `\n          <Parameter name="agentId" value="${agentId}" />`;
 
   // Close the TwiML tags
   twimlResponse += `
@@ -1291,7 +1292,6 @@ fastify.post(
       // Add parameters to the URL
       const params = {
         first_message: client.clientMeta.fullName.split(" ")[0] + "?",
-        clientId: client.clientId,
         agentId: client.agentId,
         full_name: client.clientMeta.fullName,
         business_name: client.clientMeta.businessName,
@@ -1341,7 +1341,6 @@ fastify.post(
           from: client.twilioPhoneNumber,
           agentId: client.agentId,
           startTime: new Date(),
-          status: "initiated",
           callCount: 1,
         },
         callDetails: {
@@ -1358,7 +1357,6 @@ fastify.post(
         success: true,
         message: "Call initiated successfully",
         callSid: call.sid,
-        requestId,
       });
     } catch (error) {
       fastify.log.error(`[${requestId}] Error initiating call:`, error);
