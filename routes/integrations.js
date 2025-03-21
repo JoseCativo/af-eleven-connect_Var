@@ -10,14 +10,12 @@ async function integrationsRoutes(fastify, options) {
     if (error) {
       fastify.log.error(`GHL OAuth error: ${error}`);
       return reply
-        .status(400)
+        .code(400)
         .send({ error: "Authorization failed", details: error });
     }
 
     if (!code) {
-      return reply
-        .status(400)
-        .send({ error: "No authorization code provided" });
+      return reply.code(400).send({ error: "No authorization code provided" });
     }
 
     try {
@@ -46,7 +44,7 @@ async function integrationsRoutes(fastify, options) {
           `GHL token exchange failed: ${JSON.stringify(tokenData)}`
         );
         return reply
-          .status(400)
+          .code(400)
           .send({ error: "Failed to obtain tokens", details: tokenData });
       }
 
@@ -55,41 +53,66 @@ async function integrationsRoutes(fastify, options) {
       // Calculate token expiration time
       const expiresAt = new Date(Date.now() + expires_in * 1000);
 
-      // Use state parameter instead of clientId
+      // Use state parameter as clientId
       const clientId = state || request.query.clientId;
       if (!clientId) {
         fastify.log.error("No client identifier provided in callback");
         return reply
-          .status(400)
+          .code(400)
           .send({ error: "Client identifier (state parameter) is required" });
       }
 
-      // Update the client document in MongoDB
+      // Check if client exists
+      const existingClient = await Client.findOne({ clientId });
+
+      if (!existingClient) {
+        fastify.log.error(`Client not found with ID: ${clientId}`);
+        return reply.code(404).send({
+          error: "Client not found",
+          details: `No client found with ID: ${clientId}`,
+          recommendation: "Verify the client ID is correct",
+        });
+      }
+
+      // Update the client document in MongoDB with explicit fields
       const updatedClient = await Client.findOneAndUpdate(
         { clientId },
         {
-          // Store tokens separately, not overwriting clientSecret
-          accessToken: access_token,
-          refreshToken: refresh_token,
-          tokenExpiresAt: expiresAt,
+          // Store tokens in the correct fields
+          $set: {
+            accessToken: access_token,
+            refreshToken: refresh_token,
+            tokenExpiresAt: expiresAt,
+          },
         },
         {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true,
+          new: true, // Return the updated document
         }
       );
 
       fastify.log.info(`GHL tokens stored for client ${clientId}`);
+
+      // Log token details for verification (excluding sensitive parts)
+      fastify.log.debug(
+        `Token details: accessToken present: ${!!updatedClient.accessToken}, refreshToken present: ${!!updatedClient.refreshToken}, expires: ${
+          updatedClient.tokenExpiresAt
+        }`
+      );
+
       return reply.send({
         message: "GHL integration successful",
         clientId: clientId,
-        accessToken: access_token,
+        integration: {
+          status: "success",
+          expiresAt: expiresAt,
+          hasAccessToken: !!updatedClient.accessToken,
+          hasRefreshToken: !!updatedClient.refreshToken,
+        },
       });
     } catch (err) {
       fastify.log.error(`Error in GHL callback: ${err.message}`);
       return reply
-        .status(500)
+        .code(500)
         .send({ error: "Internal server error", details: err.message });
     }
   });
@@ -99,7 +122,18 @@ async function integrationsRoutes(fastify, options) {
     const { clientId } = request.params;
 
     if (!clientId) {
-      return reply.status(400).send({ error: "Client ID is required" });
+      return reply.code(400).send({ error: "Client ID is required" });
+    }
+
+    // Validate that the client exists
+    const client = await Client.findOne({ clientId });
+
+    if (!client) {
+      fastify.log.warn(`Client not found with ID: ${clientId}`);
+      return reply.code(404).send({
+        error: "Client not found",
+        details: `No client found with ID: ${clientId}`,
+      });
     }
 
     const authUrl = new URL(
@@ -114,7 +148,15 @@ async function integrationsRoutes(fastify, options) {
     );
     authUrl.searchParams.append("state", clientId);
 
-    reply.send({ authorizationUrl: authUrl.toString() });
+    reply.send({
+      authorizationUrl: authUrl.toString(),
+      clientId: clientId,
+      currentIntegrationStatus: {
+        hasAccessToken: !!client.accessToken,
+        hasRefreshToken: !!client.refreshToken,
+        tokenExpiresAt: client.tokenExpiresAt,
+      },
+    });
   });
 }
 

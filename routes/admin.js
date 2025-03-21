@@ -8,7 +8,11 @@ import {
   findClientsWithRecentCalls,
   findClientsByAgentAndOutcome,
 } from "../crud.js";
-import { checkAndRefreshToken, refreshGhlToken } from "../utils/ghl.js";
+import {
+  migrateClientTokens,
+  checkAndRefreshToken,
+  refreshGhlToken,
+} from "../utils/ghl.js";
 /**
  * Admin routes - all require admin authentication
  * These routes are prefixed with /admin in the main app
@@ -628,6 +632,34 @@ export default async function adminRoutes(fastify, options) {
     }
   });
 
+  // one time call to upgrade clients
+  fastify.post("/migrate-ghl-tokens", async (request, reply) => {
+    try {
+      fastify.log.info("Admin initiated GHL token migration");
+
+      const migrationResults = await migrateClientTokens();
+
+      fastify.log.info(
+        `GHL token migration completed: ${migrationResults.migrated}/${migrationResults.total} clients migrated`
+      );
+
+      reply.send({
+        success: true,
+        message: "GHL token migration completed",
+        migrated: migrationResults.migrated,
+        total: migrationResults.total,
+        skipped: migrationResults.total - migrationResults.migrated,
+      });
+    } catch (error) {
+      fastify.log.error("Error during GHL token migration:", error);
+      reply.code(500).send({
+        success: false,
+        error: "Failed to migrate GHL tokens",
+        details: error.message,
+      });
+    }
+  });
+
   // GHL Token refresh endpoint - for manual refresh by admin
   fastify.post(
     "/clients/:clientId/refresh-ghl-token",
@@ -676,10 +708,16 @@ export default async function adminRoutes(fastify, options) {
           );
           const newToken = await refreshGhlToken(clientId);
 
+          // Get updated client data
+          const updatedClient = await Client.findOne({ clientId });
+
           message = "GHL token forcefully refreshed";
           result = {
             clientId: client.clientId,
             tokenRefreshed: true,
+            accessToken: updatedClient.accessToken ? "present" : "missing",
+            refreshToken: updatedClient.refreshToken ? "present" : "missing",
+            tokenExpiresAt: updatedClient.tokenExpiresAt,
             message: "Token was forcefully refreshed as requested",
           };
         } else {
@@ -693,6 +731,7 @@ export default async function adminRoutes(fastify, options) {
           const oldExpiryTime = clientBefore.tokenExpiresAt
             ? new Date(clientBefore.tokenExpiresAt).getTime()
             : 0;
+          const hadAccessToken = !!clientBefore.accessToken;
 
           // Perform token check and refresh if needed
           const { accessToken } = await checkAndRefreshToken(clientId);
@@ -703,7 +742,7 @@ export default async function adminRoutes(fastify, options) {
             ? new Date(clientAfter.tokenExpiresAt).getTime()
             : 0;
 
-          const wasRefreshed = newExpiryTime > oldExpiryTime;
+          const wasRefreshed = newExpiryTime > oldExpiryTime || !hadAccessToken;
 
           message = wasRefreshed
             ? "GHL token was refreshed"
@@ -711,9 +750,11 @@ export default async function adminRoutes(fastify, options) {
           result = {
             clientId: client.clientId,
             tokenRefreshed: wasRefreshed,
+            accessToken: clientAfter.accessToken ? "present" : "missing",
+            refreshToken: clientAfter.refreshToken ? "present" : "missing",
             tokenExpiresAt: clientAfter.tokenExpiresAt,
             message: wasRefreshed
-              ? "Token was expired or about to expire and has been refreshed"
+              ? "Token was expired or missing and has been refreshed"
               : "Token is still valid and was not refreshed",
           };
         }
@@ -781,7 +822,10 @@ export default async function adminRoutes(fastify, options) {
       let status;
       let message;
 
-      if (!tokenExpiresAt) {
+      if (!client.accessToken) {
+        status = "missing_access_token";
+        message = "Access token is missing but refresh token is present";
+      } else if (!tokenExpiresAt) {
         status = "unknown";
         message = "Token expiration date is not available";
       } else if (tokenExpiresAt < now) {
@@ -822,7 +866,6 @@ export default async function adminRoutes(fastify, options) {
     }
   });
 }
-
 // Helper function to generate a unique ID
 function generateUniqueId() {
   return (

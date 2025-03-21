@@ -78,6 +78,7 @@ const clientSchema = new mongoose.Schema(
     },
     calId: { type: String, required: true },
     clientSecret: { type: String },
+    accessToken: { type: String }, // GHL access token (separate from clientSecret)
     refreshToken: { type: String }, // GHL refresh token
     tokenExpiresAt: { type: Date }, // When the access token expires
     agentId: { type: String, required: true },
@@ -102,6 +103,7 @@ clientSchema.index({ "clientMeta.email": 1 });
 clientSchema.index({ agentId: 1 });
 clientSchema.index({ "callHistory.callData.callSid": 1 });
 clientSchema.index({ twilioPhoneNumber: 1 });
+clientSchema.index({ accessToken: 1 }); // Index for accessToken lookups
 
 // Compiling the schema into a model
 const Client = mongoose.model("Client", clientSchema);
