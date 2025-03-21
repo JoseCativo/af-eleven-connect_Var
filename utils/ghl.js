@@ -8,18 +8,21 @@ async function refreshGhlToken(clientId) {
   }
 
   try {
-    const response = await fetch("https://api.gohighlevel.com/oauth/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: process.env.GHL_CLIENT_ID, // Your app’s client ID from GHL
-        client_secret: process.env.GHL_CLIENT_SECRET, // Your app’s client secret from GHL
-        refresh_token: client.refreshToken,
-      }),
-    });
+    const response = await fetch(
+      "https://services.leadconnectorhq.com/oauth/token",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: process.env.GHL_CLIENT_ID, // Your app’s client ID from GHL
+          client_secret: process.env.GHL_CLIENT_SECRET, // Your app’s client secret from GHL
+          redirect_uri: process.env.GHL_REDIRECT_URI,
+        }),
+      }
+    );
 
     const data = await response.json();
     if (!response.ok) {
@@ -57,7 +60,7 @@ async function makeGhlApiCall(clientId, endpoint, method = "GET", body = null) {
     client = await Client.findOne({ clientId }); // Reload updated client
   }
 
-  const url = `https://api.gohighlevel.com${endpoint}`;
+  const url = `https://services.leadconnectorhq.com${endpoint}`;
   const options = {
     method,
     headers: {
@@ -77,17 +80,44 @@ async function makeGhlApiCall(clientId, endpoint, method = "GET", body = null) {
 /**
  * Search for a contact in GoHighLevel by phone number
  * @param {string} accessToken - GHL access token
- * @param {string} phoneNumber - Phone number to search for
- * @returns {Promise<Object|null>} - Contact information or null if not found
+ * @param {string} phoneNumber - Phone number to search (should include country code)
+ * @param {string} locationId - GHL location ID (stored as clientId in our database)
+ * @param {number} [pageLimit=10] - Maximum number of results per page
+ * @returns {Promise<Object|null>} - First matching contact or null if not found
  */
-async function searchGhlContactByPhone(accessToken, phoneNumber) {
-  if (!accessToken || !phoneNumber) {
+async function searchGhlContactByPhone(
+  accessToken,
+  phoneNumber,
+  locationId,
+  pageLimit = 10
+) {
+  if (!accessToken || !phoneNumber || !locationId) {
     console.error("Missing required parameters for GHL contact search");
     return null;
   }
 
   try {
-    // Prepare the request according to GHL API specifications
+    // Construct request body according to API specifications
+    const requestBody = {
+      locationId: locationId,
+      page: 1,
+      pageLimit: pageLimit,
+      filters: [
+        {
+          field: "phone",
+          operator: "contains",
+          value: phoneNumber,
+        },
+      ],
+      sort: [
+        {
+          field: "dateAdded",
+          direction: "desc",
+        },
+      ],
+    };
+
+    // Make the API request
     const response = await fetch(
       "https://services.gohighlevel.com/v2/contacts/search",
       {
@@ -97,15 +127,14 @@ async function searchGhlContactByPhone(accessToken, phoneNumber) {
           "Content-Type": "application/json",
           Version: "2021-07-28",
         },
-        body: JSON.stringify({
-          query: phoneNumber, // Search by phone number
-          limit: 1, // Only need first match
-        }),
+        body: JSON.stringify(requestBody),
       }
     );
 
     if (!response.ok) {
       console.error(`GHL API error: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(`Error details: ${errorText}`);
       return null;
     }
 
