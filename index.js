@@ -355,7 +355,9 @@ fastify.register(async (fastifyInstance) => {
 
             try {
               // Create the config with proper format TODO test
-
+              const todays_date = calculateTime(0);
+              const one_week_date = calculateTime(7);
+              const four_week_date = calculateTime(0, 4);
               // Extract dynamic variables from custom parameters
               const dynamicVariables = {};
 
@@ -375,15 +377,9 @@ fastify.register(async (fastifyInstance) => {
               if (customParameters?.agentId)
                 dynamicVariables.agentId = customParameters.agentId;
 
-              if (customParameters?.todays_date)
-                dynamicVariables.todays_date = customParameters.todays_date;
-
-              if (customParameters?.one_week_date)
-                dynamicVariables.one_week_date = customParameters.one_week_date;
-
-              if (customParameters?.four_week_date)
-                dynamicVariables.four_week_date =
-                  customParameters.four_week_date;
+              dynamicVariables.todays_date = todays_date;
+              dynamicVariables.one_week_date = one_week_date;
+              dynamicVariables.four_week_date = four_week_date;
 
               // Create the initialization config with dynamic variables
               const initialConfig = {
@@ -623,10 +619,6 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     request.query
   );
 
-  const todays_date = calculateTime(0);
-  const one_week_date = calculateTime(7);
-  const four_week_date = calculateTime(0, 4);
-
   // Create the TwiML response that passes all variables to the WebSocket stream
   let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
@@ -652,12 +644,12 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
   if (agentId)
     twimlResponse += `\n          <Parameter name="agentId" value="${agentId}" />`;
-  if (todays_date)
-    twimlResponse += `\n          <Parameter name="agentId" value="${todays_date}" />`;
-  if (one_week_date)
-    twimlResponse += `\n          <Parameter name="agentId" value="${one_week_date}" />`;
-  if (four_week_date)
-    twimlResponse += `\n          <Parameter name="agentId" value="${four_week_date}" />`;
+  // if (todays_date)
+  //   twimlResponse += `\n          <Parameter name="agentId" value="${todays_date}" />`;
+  // if (one_week_date)
+  //   twimlResponse += `\n          <Parameter name="agentId" value="${one_week_date}" />`;
+  // if (four_week_date)
+  //   twimlResponse += `\n          <Parameter name="agentId" value="${four_week_date}" />`;
   // Close the TwiML tags
   twimlResponse += `
         </Stream>
