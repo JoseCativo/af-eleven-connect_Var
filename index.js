@@ -1268,7 +1268,7 @@ fastify.post("/call-status", async (request, reply) => {
 const start = async () => {
   try {
     await connectDB();
-    fastify.listen({ port: process.env.PORT || 8000, host: "0.0.0.0" });
+    await fastify.listen({ port: process.env.PORT || 8000, host: "0.0.0.0" });
     console.log(`Server listening on ${fastify.server.address().port}`);
   } catch (err) {
     fastify.log.error(err);
