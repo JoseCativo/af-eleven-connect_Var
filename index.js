@@ -374,6 +374,13 @@ fastify.register(async (fastifyInstance) => {
                 dynamicVariables.phone = customParameters.phone;
               if (customParameters?.agentId)
                 dynamicVariables.agentId = customParameters.agentId;
+              if (customParameters?.todays_date)
+                dynamicVariables.todays_date = customParameters.todays_date;
+              if (customParameters?.one_week_date)
+                dynamicVariables.one_week_date = customParameters.one_week_date;
+              if (customParameters?.four_week_date)
+                dynamicVariables.four_week_date =
+                  customParameters.four_week_date;
 
               // Create the initialization config with dynamic variables
               const initialConfig = {
@@ -613,6 +620,10 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     request.query
   );
 
+  const todays_date = calculateTime(0);
+  const one_week_date = calculateTime(7);
+  const four_week_date = calculateTime(0, 4);
+
   // Create the TwiML response that passes all variables to the WebSocket stream
   let twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
@@ -638,7 +649,9 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
   if (agentId)
     twimlResponse += `\n          <Parameter name="agentId" value="${agentId}" />`;
-
+  twimlResponse += `\n          <Parameter name="agentId" value="${todays_date}" />`;
+  twimlResponse += `\n          <Parameter name="agentId" value="${one_week_date}" />`;
+  twimlResponse += `\n          <Parameter name="agentId" value="${four_week_date}" />`;
   // Close the TwiML tags
   twimlResponse += `
         </Stream>
@@ -1479,21 +1492,49 @@ fastify.post("/call-status", async (request, reply) => {
   }
 });
 
-// Add this route to your index.js file
-
 // Simple endpoint to return the current Unix timestamp in milliseconds
 fastify.get("/get-time", async (request, reply) => {
   try {
-    // Get current timestamp in milliseconds
-    const timestamp = Date.now();
+    // Get query parameters (default to 0 if not provided)
+    const { day = 0, week = 0 } = request.query;
+
+    // Convert parameters to integers
+    const daysToAdd = parseInt(day);
+    const weeksToAdd = parseInt(week);
+
+    // Validate parameters are numbers
+    if (isNaN(daysToAdd) || isNaN(weeksToAdd)) {
+      return reply.code(400).send({
+        error: "Invalid parameters",
+        details: "Day and week must be valid numbers",
+      });
+    }
+
+    // Get current date
+    const currentDate = new Date();
+
+    // Calculate total days to add (weeks * 7 + days)
+    const totalDays = weeksToAdd * 7 + daysToAdd;
+
+    // Add/subtract days from current date
+    currentDate.setDate(currentDate.getDate() + totalDays);
+
+    // Get Unix timestamp in milliseconds
+    const timestamp = currentDate.getTime();
+
+    // Format the date as "YYYY-MM-DD"
+    const formattedString = currentDate.toISOString().split("T")[0];
 
     // Log the request
-    fastify.log.info(`Timestamp requested: ${timestamp}`);
-
+    fastify.log.info(
+      `Timestamp requested: ${timestamp}, days: ${daysToAdd}, weeks: ${weeksToAdd}`
+    );
+    reply.send(formattedString);
     // Return timestamp in JSON format
-    reply.send({
-      todays_date: timestamp.toString(),
-    });
+    // reply.send({
+    //   todays_date: formattedString,
+    //   unix_timestamp: timestamp.toString(),
+    // });
   } catch (error) {
     fastify.log.error("Error getting timestamp:", error);
     reply.code(500).send({
@@ -1520,6 +1561,14 @@ function mapTwilioStatusToSchema(twilioStatus) {
     default:
       return "follow_up";
   }
+}
+
+function calculateTime(daysToAdd = 0, weeksToAdd = 0) {
+  const currentDate = new Date();
+  const totalDays = weeksToAdd * 7 + daysToAdd;
+  currentDate.setDate(currentDate.getDate() + totalDays);
+
+  return currentDate.toISOString().split("T")[0];
 }
 
 // Start the Fastify server
