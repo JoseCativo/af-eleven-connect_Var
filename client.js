@@ -35,7 +35,6 @@ const callDataSchema = new mongoose.Schema(
         "dnc",
         "no_call_match",
       ],
-      required: true,
     },
     recordingUrl: { type: String },
   },

@@ -371,6 +371,8 @@ fastify.register(async (fastifyInstance) => {
                 dynamicVariables.email = customParameters.email;
               if (customParameters?.phone)
                 dynamicVariables.phone = customParameters.phone;
+              if (customParameters?.agentId)
+                dynamicVariables.agentId = customParameters.agentId;
 
               // Create the initialization config with dynamic variables
               const initialConfig = {
