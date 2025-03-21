@@ -91,7 +91,7 @@ export async function authenticateClient(request, reply) {
 }
 
 // Middleware to authenticate admin requests
-export function authenticateAdmin(request, reply) {
+export async function authenticateAdmin(request, reply) {
   try {
     // Extract token from Authorization header
     const authHeader = request.headers.authorization;
@@ -119,10 +119,8 @@ export function authenticateAdmin(request, reply) {
       error: "Unauthorized",
       message: error.message,
     });
-    return false;
+    return reply; // Return reply to terminate request processing
   }
-
-  return true;
 }
 
 // Login endpoint handler
