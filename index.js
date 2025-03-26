@@ -796,11 +796,11 @@ fastify.post(
 
       // Add customer-specific data to dynamic variables
       dynamicVariables.customer_name =
-        `${customerContact.firstName || ""} ${
-          customerContact.lastName || ""
+        `${customerContact.firstNameLowerCase || ""} ${
+          customerContact.lastNameLowerCase || ""
         }`.trim() || "there";
       dynamicVariables.customer_first_name =
-        customerContact.firstName ||
+        customerContact.firstNameLowerCase ||
         (customerContact.name ? customerContact.name.split(" ")[0] : "there");
 
       // Add other customer data when available
