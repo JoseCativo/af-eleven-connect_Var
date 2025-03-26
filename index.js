@@ -660,6 +660,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
 });
 
 // Secure endpoint for looking up customer ghl database, personalizing inbound call experiences TODO test
+// Secure endpoint for looking up customer in GHL database and personalizing inbound call experiences
 fastify.post(
   "/get-info",
   {
@@ -670,9 +671,23 @@ fastify.post(
     const requestId =
       Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
+    // Calculate date variables once at the beginning
+    const todays_date = calculateTime(0);
+    const one_week_date = calculateTime(7);
+    const four_week_date = calculateTime(0, 4);
+
+    // Default first message
+    const defaultFirstMessage =
+      "Hey, I'm Jess from Affinity Design. How may I assist you today?";
+
     console.log(
       `[${requestId}] Processing inbound call personalization request:`,
-      { caller_id, called_number }
+      {
+        caller_id,
+        called_number,
+        agent_id,
+        call_sid,
+      }
     );
 
     // Validate required parameters
@@ -685,110 +700,149 @@ fastify.post(
     }
 
     try {
-      // Find client by matching the called number with twilioPhoneNumber in our database
-      const client = await Client.findOne({ twilioPhoneNumber: called_number });
+      // Find agency client by matching the called number with twilioPhoneNumber in our database
+      const agencyClient = await Client.findOne({
+        twilioPhoneNumber: called_number,
+      });
 
-      if (!client) {
+      if (!agencyClient) {
         console.log(
-          `[${requestId}] No client found for called number: ${called_number}`
+          `[${requestId}] No agency client found for called number: ${called_number}`
         );
         return reply.send({
+          type: "conversation_initiation_client_data",
+          dynamic_variables: {
+            todays_date,
+            one_week_date,
+            four_week_date,
+          },
           conversation_config_override: {
             agent: {
-              first_message: "Hello!",
+              first_message: defaultFirstMessage,
             },
           },
         });
       }
 
       console.log(
-        `[${requestId}] Found client: ${client.clientId}, checking for GHL integration`
+        `[${requestId}] Found agency client: ${agencyClient.clientId}, checking for GHL integration`
       );
 
-      // Check if client has GHL integration (refreshToken)
-      if (!client.refreshToken) {
-        console.log(`[${requestId}] Client has no GHL refresh token`);
+      // Initialize dynamic variables with date values and agent info
+      const dynamicVariables = {
+        todays_date,
+        one_week_date,
+        four_week_date,
+        agentId: agent_id || agencyClient.agentId,
+      };
+
+      // If agency client doesn't have GHL integration, return with minimal dynamic variables
+      if (!agencyClient.refreshToken) {
+        console.log(`[${requestId}] Agency client has no GHL refresh token`);
         return reply.send({
+          type: "conversation_initiation_client_data",
+          dynamic_variables: dynamicVariables,
           conversation_config_override: {
             agent: {
-              first_message: "Hello!",
+              first_message: defaultFirstMessage,
             },
           },
         });
       }
 
-      let contact = null;
+      let customerContact = null;
 
       try {
         // Use the checkAndRefreshToken function to get a valid token
-        const { accessToken } = await checkAndRefreshToken(client.clientId);
+        const { accessToken } = await checkAndRefreshToken(
+          agencyClient.clientId
+        );
 
-        // Search for the contact using the validated token
-        contact = await searchGhlContactByPhone(
+        // Search for the end customer using the validated token
+        customerContact = await searchGhlContactByPhone(
           accessToken,
           caller_id,
-          client.clientId
+          agencyClient.clientId
         );
       } catch (ghlError) {
         console.error(`[${requestId}] GHL API error:`, ghlError);
-        // Return default greeting if GHL API fails
+        // Return with only basic dynamic variables on GHL error
         return reply.send({
+          type: "conversation_initiation_client_data",
+          dynamic_variables: dynamicVariables,
           conversation_config_override: {
             agent: {
-              first_message: "Hello!",
+              first_message: defaultFirstMessage,
             },
           },
         });
       }
 
-      // If no contact found in GHL, return default greeting
-      if (!contact) {
+      // If no customer contact found in GHL, return with only basic dynamic variables
+      if (!customerContact) {
         console.log(
-          `[${requestId}] No contact found in GHL for caller: ${caller_id}`
+          `[${requestId}] No customer contact found in GHL for caller: ${caller_id}`
         );
         return reply.send({
+          type: "conversation_initiation_client_data",
+          dynamic_variables: dynamicVariables,
           conversation_config_override: {
             agent: {
-              first_message: "Hello!",
+              first_message: defaultFirstMessage,
             },
           },
         });
       }
 
-      // Map GHL contact data to dynamic variables
-      const dynamic_variables = {
-        customer_name:
-          `${contact.firstName || ""} ${contact.lastName || ""}`.trim() ||
-          "there",
-        email: contact.email || "",
-        company: contact.companyName || "",
-        jobTitle: contact.title || "",
-        city: contact.city || "",
-      };
+      // Add customer-specific data to dynamic variables
+      dynamicVariables.customer_name =
+        `${customerContact.firstName || ""} ${
+          customerContact.lastName || ""
+        }`.trim() || "there";
+      dynamicVariables.customer_first_name =
+        customerContact.firstName ||
+        (customerContact.name ? customerContact.name.split(" ")[0] : "there");
+
+      // Add other customer data when available
+      if (customerContact.email) dynamicVariables.email = customerContact.email;
+      if (customerContact.companyName)
+        dynamicVariables.company = customerContact.companyName;
+      if (customerContact.title)
+        dynamicVariables.job_title = customerContact.title;
+      if (customerContact.city) dynamicVariables.city = customerContact.city;
+      dynamicVariables.phone = caller_id;
 
       console.log(
-        `[${requestId}] Successfully retrieved contact information from GHL for ${dynamic_variables.customer_name}`
+        `[${requestId}] Successfully retrieved customer information from GHL for ${dynamicVariables.customer_name}`
       );
 
-      // Return personalized response with dynamic variables
+      // Create personalized first message
+      const personalizedFirstMessage = `Hey ${dynamicVariables.customer_first_name}, how are you today?`;
+
+      // Return personalized response with all dynamic variables
       return reply.send({
-        dynamic_variables,
+        type: "conversation_initiation_client_data",
+        dynamic_variables: dynamicVariables,
         conversation_config_override: {
           agent: {
-            first_message: `Hey ${
-              dynamic_variables.customer_name.split(" ")[0]
-            }, how is it going?`,
+            first_message: personalizedFirstMessage,
           },
         },
       });
     } catch (error) {
       console.error(`[${requestId}] Error personalizing call:`, error);
 
-      // Return default response on error
+      // Return default response with basic dynamic variables on error
       return reply.send({
+        type: "conversation_initiation_client_data",
+        dynamic_variables: {
+          todays_date,
+          one_week_date,
+          four_week_date,
+        },
         conversation_config_override: {
           agent: {
-            first_message: "Hello!",
+            first_message: defaultFirstMessage,
           },
         },
       });
