@@ -792,7 +792,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
   if (agentId)
     twimlResponse += `\n          <Parameter name="agentId" value="${agentId}" />`;
   if (address)
-    twimlResponse += `\n          <Parameter name="agentId" value="${address}" />`;
+    twimlResponse += `\n          <Parameter name="address" value="${address}" />`;
   // if (todays_date)
   //   twimlResponse += `\n          <Parameter name="agentId" value="${todays_date}" />`;
   // if (one_week_date)
