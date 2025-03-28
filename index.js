@@ -1301,7 +1301,7 @@ fastify.post(
           startTime,
           endTime,
           title,
-          meetingLocationType: meeting_location ? "Custom" : "Default", // Always use default as specified
+          meetingLocationType: meeting_location ? "custom" : "default", // Always use default as specified
           appointmentStatus,
           address,
           ignoreDateRange,
