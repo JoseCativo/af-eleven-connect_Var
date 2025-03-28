@@ -1272,9 +1272,7 @@ fastify.post(
 
         // Extract contact details for the title
         const contactFirstName =
-          contactData.firstName ||
-          (contactData.name ? contactData.name.split(" ")[0] : null) ||
-          "Client";
+          contactData.firstNameLowerCase || "Appointment";
 
         // Create the custom appointment title
         const title = `${contactFirstName} x ${
@@ -1301,7 +1299,7 @@ fastify.post(
           startTime,
           endTime,
           title,
-          meetingLocationType: meeting_location ? "custom" : "default", // Always use default as specified
+          meetingLocationType: "default",
           appointmentStatus,
           address,
           ignoreDateRange,

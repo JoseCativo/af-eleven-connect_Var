@@ -458,7 +458,7 @@ _(Wait for complete response)_
 _(Wait for complete response, then respond with something like "Well, you're in for a treat with Colour Your Life!")_
 
 **Example 3 - Project details:**
-"What kind of painting project are you looking to have done?"
+"What kind of painting project are you looking to get done?"
 _(Wait for complete response)_
 
 **Example 4 - Timeline question:**
