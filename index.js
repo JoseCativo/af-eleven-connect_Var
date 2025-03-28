@@ -300,6 +300,7 @@ fastify.register(async (fastifyInstance) => {
       let isElevenLabsReady = false;
       let messageQueue = []; // Queue to store messages until ElevenLabs is ready
       let clientInfo = null; // Store client information from get-info API
+      let connectionHealthCheck = null; // Reference to the health check interval
 
       // Handle WebSocket errors
       ws.on("error", (error) => {
@@ -331,7 +332,6 @@ fastify.register(async (fastifyInstance) => {
       const setupElevenLabs = async () => {
         try {
           // Use the agent ID from parameters or default
-
           const agentId = customParameters?.agentId;
           console.log("[ElevenLabs] AGENT ID:", agentId);
 
@@ -346,8 +346,45 @@ fastify.register(async (fastifyInstance) => {
 
           elevenLabsWs = new WebSocket(signedUrl);
 
+          // Improved error handler for ElevenLabs WebSocket
           elevenLabsWs.on("error", (error) => {
             console.error("[ElevenLabs] WebSocket error:", error);
+
+            // Close both connections when there's an error with ElevenLabs
+            isElevenLabsReady = false;
+
+            try {
+              // First try to gracefully close ElevenLabs if it's still open
+              if (elevenLabsWs.readyState === WebSocket.OPEN) {
+                elevenLabsWs.close(1011, "Error occurred");
+              }
+
+              // Then close Twilio connection if it's open
+              if (ws.readyState === WebSocket.OPEN) {
+                console.log(
+                  "[ElevenLabs] Closing Twilio connection due to ElevenLabs error"
+                );
+                ws.send(
+                  JSON.stringify({
+                    event: "clear",
+                    streamSid,
+                  })
+                );
+
+                setTimeout(() => {
+                  ws.close(1011, "ElevenLabs error");
+                }, 500);
+              }
+            } catch (closeError) {
+              console.error(
+                "[ElevenLabs] Error during connection cleanup:",
+                closeError
+              );
+              // Last resort attempt to close Twilio
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.close(1011, "Fatal error during cleanup");
+              }
+            }
           });
 
           elevenLabsWs.on("open", () => {
@@ -376,6 +413,8 @@ fastify.register(async (fastifyInstance) => {
                 dynamicVariables.phone = customParameters.phone;
               if (customParameters?.agentId)
                 dynamicVariables.agentId = customParameters.agentId;
+              if (customParameters?.address)
+                dynamicVariables.address = customParameters.address;
 
               dynamicVariables.todays_date = todays_date;
               dynamicVariables.one_week_date = one_week_date;
@@ -405,6 +444,52 @@ fastify.register(async (fastifyInstance) => {
               // Mark as ready and process any queued messages
               isElevenLabsReady = true;
               processQueuedMessages();
+
+              // Set up the connection health check
+              connectionHealthCheck = setInterval(() => {
+                if (
+                  !elevenLabsWs ||
+                  elevenLabsWs.readyState !== WebSocket.OPEN
+                ) {
+                  if (ws && ws.readyState === WebSocket.OPEN) {
+                    console.log(
+                      "[HealthCheck] ElevenLabs connection lost but Twilio still open. Closing Twilio connection."
+                    );
+                    try {
+                      ws.send(
+                        JSON.stringify({
+                          event: "clear",
+                          streamSid,
+                        })
+                      );
+
+                      setTimeout(() => {
+                        ws.close(1011, "ElevenLabs connection lost");
+                      }, 500);
+                    } catch (err) {
+                      console.error(
+                        "[HealthCheck] Error closing stale Twilio connection:",
+                        err
+                      );
+                      // Try direct close as a last resort
+                      ws.close(1011, "Connection health check failure");
+                    }
+                  }
+
+                  // Clear the interval if both connections are closed
+                  if (
+                    (!ws || ws.readyState !== WebSocket.OPEN) &&
+                    (!elevenLabsWs ||
+                      elevenLabsWs.readyState !== WebSocket.OPEN)
+                  ) {
+                    console.log(
+                      "[HealthCheck] Both connections closed, clearing health check interval"
+                    );
+                    clearInterval(connectionHealthCheck);
+                    connectionHealthCheck = null;
+                  }
+                }
+              }, 5000); // Check every 5 seconds
             } catch (configError) {
               console.error(
                 "[ElevenLabs] Error preparing configuration:",
@@ -489,6 +574,7 @@ fastify.register(async (fastifyInstance) => {
             }
           });
 
+          // Improved close handler that properly closes Twilio connection
           elevenLabsWs.on("close", (code, reason) => {
             console.log(
               `[ElevenLabs] Disconnected: Code: ${code}, Reason: ${
@@ -496,6 +582,50 @@ fastify.register(async (fastifyInstance) => {
               }`
             );
             isElevenLabsReady = false;
+
+            // Add this block to close the Twilio connection when ElevenLabs disconnects
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              console.log(
+                "[ElevenLabs] Closing Twilio connection due to ElevenLabs disconnection"
+              );
+              // Send a final message to Twilio indicating the call is ending
+              try {
+                ws.send(
+                  JSON.stringify({
+                    event: "clear",
+                    streamSid,
+                  })
+                );
+
+                // Close the Twilio WebSocket with a proper code
+                setTimeout(() => {
+                  ws.close(1000, "ElevenLabs disconnected");
+                }, 500); // Small delay to allow the clear message to be sent
+              } catch (err) {
+                console.error(
+                  "[ElevenLabs] Error closing Twilio connection:",
+                  err
+                );
+                // Attempt to close anyway
+                try {
+                  ws.close(1011, "ElevenLabs error during close");
+                } catch (finalErr) {
+                  console.error(
+                    "[ElevenLabs] Final error during Twilio close:",
+                    finalErr
+                  );
+                }
+              }
+            }
+
+            // Clean up the health check interval
+            if (connectionHealthCheck) {
+              clearInterval(connectionHealthCheck);
+              connectionHealthCheck = null;
+              console.log(
+                "[ElevenLabs] Health check cleared on ElevenLabs close"
+              );
+            }
           });
         } catch (error) {
           console.error("[ElevenLabs] Setup error:", error);
@@ -563,6 +693,13 @@ fastify.register(async (fastifyInstance) => {
               if (elevenLabsWs && elevenLabsWs.readyState === WebSocket.OPEN) {
                 elevenLabsWs.close(1000, "Call completed");
               }
+
+              // Clean up the health check interval on normal stop
+              if (connectionHealthCheck) {
+                clearInterval(connectionHealthCheck);
+                connectionHealthCheck = null;
+                console.log("[Twilio] Health check cleared on stop event");
+              }
               break;
 
             default:
@@ -573,11 +710,20 @@ fastify.register(async (fastifyInstance) => {
         }
       });
 
-      // Handle WebSocket closure
+      // Improved Twilio WebSocket close handler
       ws.on("close", () => {
         console.log("[Twilio] Client disconnected");
+
+        // Close ElevenLabs if it's still open
         if (elevenLabsWs && elevenLabsWs.readyState === WebSocket.OPEN) {
           elevenLabsWs.close(1000, "Twilio disconnected");
+        }
+
+        // Clean up the health check interval
+        if (connectionHealthCheck) {
+          clearInterval(connectionHealthCheck);
+          connectionHealthCheck = null;
+          console.log("[Twilio] Health check cleared on Twilio close");
         }
       });
     }
@@ -612,6 +758,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     phone,
     requestId,
     agentId,
+    address,
   } = request.query;
 
   console.log(
@@ -644,6 +791,8 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
     twimlResponse += `\n          <Parameter name="requestId" value="${requestId}" />`;
   if (agentId)
     twimlResponse += `\n          <Parameter name="agentId" value="${agentId}" />`;
+  if (address)
+    twimlResponse += `\n          <Parameter name="agentId" value="${address}" />`;
   // if (todays_date)
   //   twimlResponse += `\n          <Parameter name="agentId" value="${todays_date}" />`;
   // if (one_week_date)
@@ -659,8 +808,7 @@ fastify.all("/outbound-call-twiml", async (request, reply) => {
   reply.type("text/xml").send(twimlResponse);
 });
 
-// Secure endpoint for looking up customer ghl database, personalizing inbound call experiences TODO test
-// Secure endpoint for looking up customer in GHL database and personalizing inbound call experiences
+// GET INFO Secure endpoint for looking up customer in GHL database and personalizing inbound call experiences
 fastify.post(
   "/get-info",
   {
@@ -811,6 +959,9 @@ fastify.post(
         dynamicVariables.job_title = customerContact.title;
       if (customerContact.city) dynamicVariables.city = customerContact.city;
       dynamicVariables.phone = caller_id;
+      if (customerContact.address)
+        dynamicVariables.address = customerContact.address;
+      dynamicVariables.phone = caller_id;
 
       console.log(
         `[${requestId}] Successfully retrieved customer information from GHL for ${dynamicVariables.customer_name}`
@@ -850,7 +1001,7 @@ fastify.post(
   }
 );
 
-// Replace the existing get-availability endpoint with this improved version
+// GET AVAILIBILITY Replace the existing get-availability endpoint with this improved version
 fastify.get(
   "/get-availability",
   {
@@ -1002,7 +1153,7 @@ fastify.get(
   }
 );
 
-// Route to book an appointment
+// BOOK APPOINTMENT Route to book an appointment
 fastify.post(
   "/book-appointment",
   {
@@ -1019,6 +1170,7 @@ fastify.post(
       endTime,
       phone, // Phone parameter for contact lookup
       meeting_title,
+      meeting_location,
     } = request.body;
 
     try {
@@ -1136,7 +1288,7 @@ fastify.post(
 
         // Set fixed parameters as specified
         const appointmentStatus = "confirmed";
-        const address = "Google Meet";
+        const address = meeting_location || "Google Meet";
         const ignoreDateRange = false;
         const toNotify = true;
         const ignoreFreeSlotValidation = false;
@@ -1149,7 +1301,7 @@ fastify.post(
           startTime,
           endTime,
           title,
-          meetingLocationType: "default", // Always use default as specified
+          meetingLocationType: meeting_location ? "Custom" : "Default", // Always use default as specified
           appointmentStatus,
           address,
           ignoreDateRange,
@@ -1309,7 +1461,7 @@ fastify.addContentTypeParser(
   }
 );
 
-// Make call
+// MAKE OUTBOUND CALL
 fastify.post(
   "/make-outbound-call",
   {
@@ -1325,6 +1477,7 @@ fastify.post(
       city,
       job_title,
       email,
+      address,
     } = request.query;
 
     // Generate a request ID for tracking
@@ -1385,17 +1538,24 @@ fastify.post(
       let webhookUrl = `https://${request.headers.host}/outbound-call-twiml?`;
 
       // Add parameters to the URL
-      const params = {
-        first_message: `${decodeURIComponent(first_message)}`,
-        agentId: client.agentId,
-        full_name: `${decodeURIComponent(f_name) + decodeURIComponent(l_name)}`,
-        business_name: `${decodeURIComponent(business_name)}`,
-        city: `${decodeURIComponent(city)}`,
-        job_title: `${decodeURIComponent(job_title)}`,
-        email: `${decodeURIComponent(email)}`,
-        phone,
-        requestId,
-      };
+      const params = { requestId, phone }; // Always include
+
+      // Add other parameters only if they are truthy
+      if (first_message)
+        params.first_message = decodeURIComponent(first_message);
+      if (client && client.agentId) params.agentId = client.agentId;
+      if (f_name || l_name) {
+        // Combine first and last name if either exists
+        const firstName = f_name ? decodeURIComponent(f_name) : "";
+        const lastName = l_name ? decodeURIComponent(l_name) : "";
+        params.full_name = (firstName + " " + lastName).trim();
+      }
+      if (business_name)
+        params.business_name = decodeURIComponent(business_name);
+      if (city) params.city = decodeURIComponent(city);
+      if (job_title) params.job_title = decodeURIComponent(job_title);
+      if (email) params.email = decodeURIComponent(email);
+      if (address) params.address = decodeURIComponent(address);
 
       // Convert parameters to URL query string
       const queryParams = [];
@@ -1554,7 +1714,7 @@ fastify.post("/call-status", async (request, reply) => {
   }
 });
 
-// Simple endpoint to return the current Unix timestamp in milliseconds
+// GET TIME Simple endpoint to return the current Unix timestamp in milliseconds
 fastify.get("/get-time", async (request, reply) => {
   try {
     // Get query parameters (default to 0 if not provided)
